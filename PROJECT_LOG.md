@@ -6,17 +6,17 @@
 The long-term goal of PatchGuard is to build a real-world software engineering bug-risk prediction system. The final architecture will analyze code changes (Git commits / Pull Requests), predict bug probability using Machine Learning, provide LLM-driven risk explanations, leverage RAG over repository documentation/issues/PR history, and integrate into developer CI/CD workflows to give actionable recommendations.
 
 ## Current Stage
-**Phase 5 Complete — Risk Prediction Engine Completed and Approved**
+**Phase 6 Complete — LLM Code-Change Analysis & CLI Completed, Tested, and Checkpointed**
 
 ### Handoff Guide for Future AI / Developer Sessions
 > [!IMPORTANT]
-> **Phase 5 is COMPLETE and APPROVED**.
-> **DO NOT START PHASE 6 IMPLEMENTATION YET.**
+> **Phase 6 is COMPLETE and CHECKPOINTED**.
+> **DO NOT START PHASE 7 IMPLEMENTATION YET.**
 >
 > When resuming development in a future session:
 > 1. First inspect [`README.md`](file:///c:/Projects/CODE_project/bug-prediction/README.md), [`PROJECT_LOG.md`](file:///c:/Projects/CODE_project/bug-prediction/PROJECT_LOG.md), `git status`, and `git log`.
-> 2. Understand that the next phase is **Phase 6 — LLM Code-Change Analysis**.
-> 3. The Phase 6 task will be to design and implement LLM-driven code explanation over Git diffs and ML prediction context.
+> 2. Understand that Phase 6 (Offline Git Diff Extraction, Analysis Schemas, Prompt Builder, Response Parser, Evidence Validator, OpenAI Provider Integration, CLI Orchestration, and Verification) is complete, tested with 81 passing unit tests, and fully checkpointed.
+> 3. The next phase is **Phase 7 — RAG / Repository Intelligence**.
 >
 > **Long-Term Roadmap**:
 > 1. Project & ML Foundation — **COMPLETE**
@@ -24,11 +24,49 @@ The long-term goal of PatchGuard is to build a real-world software engineering b
 > 3. Defect Labeling / SZZ — **COMPLETE**
 > 4. Real-Data ML Pipeline — **COMPLETE**
 > 5. Risk Prediction Engine — **COMPLETE**
-> 6. **LLM Code-Change Analysis — NEXT**
-> 7. RAG / Repository Intelligence
+> 6. LLM Code-Change Analysis & CLI — **COMPLETE**
+> 7. **RAG / Repository Intelligence — NEXT**
 > 8. Developer Dashboard
 > 9. GitHub / CI-CD Integration
 > 10. Productionization
+
+---
+
+## Phase 6.7 Final Verification, Documentation & Milestone Checkpoint
+
+Completed Phase 6.7 (Final Testing, Documentation, and Checkpointing), performing end-to-end verification, schema stability auditing, CLI smoke testing, offline test execution, documentation alignment, repository hygiene, and milestone commit creation for Phase 6.
+
+### 1. Final Phase 6 Milestone Summary
+* **Phase 6.2 (Git Diff Extraction)**: `GitDiffExtractor` parsing commits into structured `CommitDiff`, `FileDiff`, `DiffHunk`, and `DiffLine` domain models.
+* **Phase 6.3 (Analysis Schemas & Provider Abstractions)**: `LLMAnalysisResult` schema, `LLMProvider` base contract, and deterministic `MockLLMProvider`.
+* **Phase 6.4 (Prompt Builder, Analyzer, Response Parser, Evidence Validator)**: Budget-managed prompt construction (`PromptBuilder`), `LLMCodeAnalyzer` pipeline orchestrator, defensive `ResponseParser` handling markdown code-fence sanitization, and `EvidenceValidator` checking cited line ranges against structured diff lines.
+* **Phase 6.5 (OpenAI LLM Provider)**: Live provider integration using official OpenAI Python SDK (`OpenAIProvider`, `max_retries` configuration, environment API key handling).
+* **Phase 6.6 (CLI Integration)**: Unified CLI (`src/cli.py`) orchestrating quantitative `predict` and qualitative `analyze` subcommands with text card and JSON rendering.
+* **Phase 6.7 (Final Testing & Checkpoint)**: Comprehensive test suite verification, schema validation, documentation alignment, hygiene verification, and checkpoint commit creation.
+
+### 2. Test Verification & Suite Count
+* **Full Automated Test Suite**: **81 passing unit tests** across 8 test modules (`tests/test_cli.py`, `tests/test_openai_provider.py`, `tests/test_analysis_pipeline.py`, `tests/test_analysis_schema.py`, `tests/test_diff_extractor.py`, `tests/test_prediction_engine.py`, `tests/test_git_extractor.py`, `tests/test_szz_labeler.py`).
+* **Test Runtime & Safety**: Completed in ~61s 100% offline without network calls or API keys required.
+* **Formatting & Hygiene**: `git diff --check` passed cleanly with 0 errors.
+* **Milestone Checkpoint Commit**: `3e7a5c9` — *Complete Phase 6 LLM code-change analysis*
+
+---
+
+## Phase 6.6 CLI Integration Implementation & Verification
+
+Completed and validated Phase 6.6 (CLI Integration), extending the unified command line interface (`src/cli.py`) with the `analyze` subcommand to orchestrate Phase 5 quantitative ML risk prediction and Phase 6 qualitative LLM analysis.
+
+### 1. Key CLI Capabilities & Architectural Decoupling
+* **Subcommand Orchestration**: Added `patchguard analyze` while retaining `patchguard predict`. Reuses existing `RiskPredictionEngine` and `LLMCodeAnalyzer` pipelines without duplicating extraction, prediction, parsing, or validation logic.
+* **Provider Abstraction Selection**: Supports `--provider mock` (default, 100% offline using `MockLLMProvider`) and `--provider openai` (using `OpenAIProvider`). `--model` parameter allows specifying models (defaults to `gpt-4o-mini` for `openai`).
+* **Format Renderers**: Provides `--format text` human-readable terminal output card with structured sections (Quantitative Defect Risk, Qualitative LLM Summary, Key Changes, Potential Risk Factors, Affected Areas, Evidence Citations) and `--format json` for machine consumption.
+* **Error Handling & Exit Codes**: All domain exceptions (including `MissingAPIKeyError`, `OpenAIProviderError`, `RepositoryNotFoundError`, `CommitNotFoundError`, `UnsupportedCommitTypeError`) produce clean stderr formatting (`[PatchGuard Error] ExceptionName: message`) and return exit code 1.
+* **API Key Security**: `OPENAI_API_KEY` is checked strictly from environment variables when using `--provider openai`. Never hardcoded, printed, or logged.
+
+### 2. Verification & Test Suite (`tests/test_cli.py`)
+* Comprehensive test suite containing 9 unit tests covering CLI argument parsing, default subcommands, `predict` output formatting, `analyze` mock execution (text & JSON), error handling for invalid repos/commits, missing API key error formatting, and mocked `OpenAIProvider` execution.
+* Total test suite count expanded to **81 passing tests** (64 base + 8 OpenAI + 9 CLI tests).
+* Verified 100% offline execution of tests.
 
 ---
 
