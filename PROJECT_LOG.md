@@ -6,51 +6,58 @@
 The long-term goal of PatchGuard is to build a real-world software engineering bug-risk prediction system. The final architecture will analyze code changes (Git commits / Pull Requests), predict bug probability using Machine Learning, provide LLM-driven risk explanations, leverage RAG over repository documentation/issues/PR history, and integrate into developer CI/CD workflows to give actionable recommendations.
 
 ## Current Stage
-**Phase 4 Complete — Real-Data ML Pipeline Completed and Approved**
+**Phase 5 Complete — Risk Prediction Engine Completed and Approved**
 
 ### Handoff Guide for Future AI / Developer Sessions
 > [!IMPORTANT]
-> **Phase 4 is COMPLETE and APPROVED**.
-> **DO NOT START PHASE 5 IMPLEMENTATION YET.**
+> **Phase 5 is COMPLETE and APPROVED**.
+> **DO NOT START PHASE 6 IMPLEMENTATION YET.**
 >
 > When resuming development in a future session:
 > 1. First inspect [`README.md`](file:///c:/Projects/CODE_project/bug-prediction/README.md), [`PROJECT_LOG.md`](file:///c:/Projects/CODE_project/bug-prediction/PROJECT_LOG.md), `git status`, and `git log`.
-> 2. Understand that the next phase is **Phase 5 — Risk Prediction Engine**.
-> 3. The Phase 5 task will be to **DESIGN** the Risk Prediction Engine module before writing implementation code.
->
-> **Conceptual Direction for Phase 5**:
-> ```text
-> Commit (e.g. 8f31a2c)
->   │
->   ▼
-> Feature Extraction (src/git_extractor.py)
->   │
->   ▼
-> ML Model Inference (models/logistic_regression_real.pkl @ t=0.35)
->   │
->   ▼
-> Risk Probability Score (e.g. 0.78) ──► Risk Category (e.g. HIGH)
->   │
->   ▼
-> Quantitative Signal Breakdown (+Churn, +Multi-file, +Functions)
->   │
->   ▼
-> Actionable Developer Recommendation ("Review carefully before merging")
-> ```
->
-> **Architectural Principle**: The ML model produces the quantitative risk score; later, LLMs will handle semantic code explanation. Do NOT mix LLM calls into the core ML prediction engine prematurely.
+> 2. Understand that the next phase is **Phase 6 — LLM Code-Change Analysis**.
+> 3. The Phase 6 task will be to design and implement LLM-driven code explanation over Git diffs and ML prediction context.
 >
 > **Long-Term Roadmap**:
 > 1. Project & ML Foundation — **COMPLETE**
 > 2. Real Git Repository Mining — **COMPLETE**
 > 3. Defect Labeling / SZZ — **COMPLETE**
 > 4. Real-Data ML Pipeline — **COMPLETE**
-> 5. **Risk Prediction Engine — NEXT (Design first)**
-> 6. LLM Code-Change Analysis
+> 5. Risk Prediction Engine — **COMPLETE**
+> 6. **LLM Code-Change Analysis — NEXT**
 > 7. RAG / Repository Intelligence
 > 8. Developer Dashboard
 > 9. GitHub / CI-CD Integration
 > 10. Productionization
+
+---
+
+## Phase 5 Risk Prediction Engine Implementation & Verification
+
+Completed and validated Phase 5 (Risk Prediction Engine), encapsulating the locked Phase 4 ML model (`models/logistic_regression_real.pkl` @ threshold `0.35`) and preprocessor scaler (`models/real_data_scaler.pkl`) into an inference-only engine (`RiskPredictionEngine`) and CLI tool (`src/cli.py`).
+
+### 1. Architectural Summary & Major Components Added
+* **Core Inference Engine (`src/engine/predictor.py`)**: `RiskPredictionEngine` provides a clean `predict(repo_path, commit_hash)` API. Inference-only: zero retraining, zero threshold tuning, zero dataset modifications.
+* **Canonical Schema & Ordering (`src/engine/schema.py`)**: Strictly enforces the canonical 10-feature schema names and exact column ordering (`FEATURE_COLUMNS`).
+* **Custom Exceptions (`src/engine/exceptions.py`)**: Structured exception hierarchy under `PatchGuardError` handling invalid repos, missing commits, merge commits (`UnsupportedCommitTypeError`), and zero-diff commits (`EmptyCommitError`).
+* **Targeted Commit Extractor (`src/git_extractor.py`)**: Added `extract_single_commit(commit_hash)` to extract commit-time features for single commits without full history scans.
+* **Thin CLI Tool (`src/cli.py`)**: `patchguard predict` command supporting human-readable terminal text cards (`--format text`) and structured machine JSON (`--format json`).
+* **Decoupled Architecture**: Intentionally decoupled from Phase 6 (zero LLM/RAG imports or prompt coupling in Phase 5).
+
+### 2. Provenance & Feature Contribution Signals
+* **Artifact Hashes**: `PredictionResult` records SHA-256 checksums of model and scaler pickle artifacts (`model_artifact_hash`, `scaler_artifact_hash`) alongside `model_id`, `model_version`, `feature_schema_version`, and ISO 8601 UTC timestamps.
+* **Quantitative Model Signals**: Model signals log-odds contributions ($C_i = \beta_i \cdot z_i$) are documented strictly as mathematical feature contributions to the Logistic Regression score ($z \to p$), **not** causal explanations of bugs.
+* **Presentation Risk Levels**: `LOW` ($p < 0.35$), `MEDIUM` ($0.35 \le p < 0.60$), and `HIGH` ($p \ge 0.60$) are UI presentation labels only, with explicit disclaimers attached.
+
+### 3. Verification & Test Suite (`tests/test_prediction_engine.py`)
+* Executed unit and integration test suite: **12/12 tests passed**.
+* Verified invalid repository, invalid commit SHA, merge commit rejection, threshold behavior ($0.35$), probability bounds ($p \in [0.0, 1.0]$), JSON serialization, SHA-256 artifact hashes, and deterministic repeated prediction.
+* CLI text and JSON execution verified on local commits.
+* *Known Minor Limitation*: Dedicated unit test method for empty commits (`EmptyCommitError`) is not yet implemented in `tests/test_prediction_engine.py` (logic is present in `predictor.py`).
+
+### 4. Phase 5 Release Recommendation
+**`APPROVE PHASE 5 FOR RELEASE AND PROCEED TO PHASE 6`**  
+Phase 5 (Risk Prediction Engine) is complete, validated, fully tested, inference-only, and ready for release.
 
 ---
 

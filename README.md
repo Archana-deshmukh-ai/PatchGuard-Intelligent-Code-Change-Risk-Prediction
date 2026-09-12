@@ -12,9 +12,9 @@ The long-term goal of PatchGuard is to serve as an intelligent assistant in deve
 ---
 
 ## 2. Current Project Status
-**Phase 4 Complete — Real-Data ML Pipeline Completed and Approved**
+**Phase 5 Complete — Risk Prediction Engine Completed and Approved**
 
-PatchGuard has evolved from synthetic baseline experiments to a real-world software engineering ML pipeline trained on real Git repository history mined via the SZZ defect-labeling algorithm on the mature open-source benchmark repository `bottlepy/bottle` (1,990 commits).
+PatchGuard features a production-grade, inference-only Risk Prediction Engine (`RiskPredictionEngine`) and CLI tool (`src/cli.py`) that evaluates commit-level defect risk using the locked Phase 4 Logistic Regression model (`models/logistic_regression_real.pkl` @ threshold `0.35`) and StandardScaler (`models/real_data_scaler.pkl`).
 
 ---
 
@@ -42,13 +42,13 @@ PatchGuard has evolved from synthetic baseline experiments to a real-world softw
 [ Validation Model Selection & Threshold Locking (src/select_model.py) ]
               │
               ▼
-[ Unbiased Final Test Evaluation (src/evaluate_final_test.py) ] ──► (Phase 4 Completed)
+[ Unbiased Final Test Evaluation (src/evaluate_final_test.py) ]
               │
               ▼
-[ Risk Prediction Engine & Risk Levels ] ──► (Phase 5 NEXT)
+[ Risk Prediction Engine & CLI Tool (src/cli.py) ] ──► (Phase 5 Completed)
               │
               ▼
-[ LLM Risk Explanation & RAG Context ] ──► (Future Stage)
+[ LLM Risk Explanation & RAG Context ] ──► (Phase 6 NEXT)
               │
               ▼
 [ Developer CI/CD Feedback & Dashboard ]
@@ -186,6 +186,12 @@ python src/select_model.py
 
 # 7. Execute ONE final unbiased evaluation on unseen TEST split
 python src/evaluate_final_test.py
+
+# 8. Predict defect risk for a commit via CLI
+python src/cli.py predict --repo ./path/to/repo --commit HEAD
+
+# 9. Predict defect risk for a commit via CLI with JSON output format
+python src/cli.py predict --repo ./path/to/repo --commit HEAD --format json
 ```
 
 ---
@@ -206,8 +212,8 @@ python src/evaluate_final_test.py
 - [x] **Phase 2: Real Git Repository Mining** — Subprocess-based `GitRepositoryExtractor` parsing 10 commit-time diff features across Git history.
 - [x] **Phase 3: Defect Labeling / SZZ** — Retrospective line-blame tracing (`SZZDefectLabeler`), multi-signal confidence scoring, tested on `bottlepy/bottle`.
 - [x] **Phase 4: Real-Data ML Pipeline** — Dataset construction, 70/15/15 chronological split, Train-only scaling, multi-model baseline training, validation threshold selection, final locked test evaluation.
-- [ ] **Phase 5: Risk Prediction Engine** *(NEXT)* — Turning the ML risk model into a reusable prediction module (Probability $\rightarrow$ Risk Level $\rightarrow$ Signal Breakdown $\rightarrow$ Actionable Recommendation).
-- [ ] **Phase 6: LLM Code-Change Analysis** — Generating human-readable risk explanations from code diffs using LLMs.
+- [x] **Phase 5: Risk Prediction Engine** — Inference-only `RiskPredictionEngine`, thin CLI (`patchguard predict`), model signals, SHA-256 artifact hashes, 10-feature schema enforcement.
+- [ ] **Phase 6: LLM Code-Change Analysis** *(NEXT)* — Generating human-readable risk explanations from code diffs using LLMs.
 - [ ] **Phase 7: RAG / Repository Intelligence** — Retrieving context from repository docs, historical issues, and PR history.
 - [ ] **Phase 8: Developer Dashboard** — Interactive UI for commit risk monitoring and audit reports.
 - [ ] **Phase 9: GitHub / CI-CD Integration** — Automated PR risk bot and workflow status checks.

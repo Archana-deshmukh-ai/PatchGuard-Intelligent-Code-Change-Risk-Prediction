@@ -225,6 +225,111 @@ class GitRepositoryExtractor:
         print(f"[GitExtractor] Extracted {len(df)} commits from: {self.repo_path}")
         return df
 
+    def extract_single_commit(self, commit_hash: str = "HEAD") -> Dict[str, Any]:
+        """
+        Extracts commit-level features for a single specific commit.
+        
+        Args:
+            commit_hash: Commit SHA, ref, or branch (default: "HEAD").
+            
+        Returns:
+            Dict[str, Any]: Dictionary containing commit metadata and the 10 ML features.
+        """
+        res = self._run_git(["rev-parse", "--verify", f"{commit_hash}^{{commit}}"])
+        if res.returncode != 0:
+            raise ValueError(f"Commit not found or invalid: {commit_hash}")
+        full_hash = res.stdout.strip()
+        
+        log_res = self._run_git(["log", "-1", "--format=%H|%an|%aI|%P", full_hash])
+        if log_res.returncode != 0 or not log_res.stdout.strip():
+            raise ValueError(f"Failed to retrieve log details for commit: {full_hash}")
+            
+        parts = log_res.stdout.strip().split('|')
+        author = parts[1] if len(parts) > 1 else "Unknown"
+        commit_timestamp = parts[2] if len(parts) > 2 else ""
+        parents = parts[3].split() if len(parts) > 3 and parts[3] else []
+        
+        parent = parents[0] if parents else None
+        
+        numstat_args = ["diff-tree", "--numstat", "-M"]
+        if parent:
+            numstat_args.extend([parent, full_hash])
+        else:
+            numstat_args.extend(["--root", full_hash])
+            
+        numstat_res = self._run_git(numstat_args)
+        numstat_lines = [l.strip() for l in numstat_res.stdout.splitlines() if l.strip()]
+        
+        lines_added = 0
+        lines_deleted = 0
+        files_changed = 0
+        directories_set = set()
+        test_file_modified = 0
+        max_single_file_churn = 0
+        source_files_count = 0
+        
+        for num_line in numstat_lines:
+            num_parts = num_line.split('\t')
+            if len(num_parts) < 3:
+                continue
+                
+            add_str, del_str, raw_path = num_parts[0], num_parts[1], num_parts[2]
+            clean_path = self._parse_filepath(raw_path)
+            files_changed += 1
+            
+            if add_str != '-' and del_str != '-':
+                added = int(add_str)
+                deleted = int(del_str)
+            else:
+                added = 0
+                deleted = 0
+                
+            file_churn = added + deleted
+            lines_added += added
+            lines_deleted += deleted
+            
+            if file_churn > max_single_file_churn:
+                max_single_file_churn = file_churn
+                
+            dirname = os.path.dirname(clean_path)
+            if dirname:
+                directories_set.add(dirname)
+            else:
+                directories_set.add('.')
+                
+            for pattern in TEST_PATTERNS:
+                if re.search(pattern, clean_path, re.IGNORECASE):
+                    test_file_modified = 1
+                    break
+                    
+            ext = os.path.splitext(clean_path)[1].lower()
+            if ext in SOURCE_EXTENSIONS:
+                source_files_count += 1
+                
+        code_churn = lines_added + lines_deleted
+        num_directories_touched = len(directories_set) if files_changed > 0 else 0
+        avg_lines_per_file = round(code_churn / max(1, files_changed), 2)
+        functions_changed = self._estimate_functions_changed(parent, full_hash)
+        
+        return {
+            'commit_hash': full_hash[:7],
+            'full_hash': full_hash,
+            'commit_timestamp': commit_timestamp,
+            'author': author,
+            'parents': parents,
+            'lines_added': lines_added,
+            'lines_deleted': lines_deleted,
+            'code_churn': code_churn,
+            'files_changed': files_changed,
+            'functions_changed': functions_changed,
+            'num_directories_touched': num_directories_touched,
+            'is_test_file_modified': test_file_modified,
+            'avg_lines_changed_per_file': avg_lines_per_file,
+            'max_lines_changed_in_single_file': max_single_file_churn,
+            'num_source_files_changed': source_files_count
+        }
+
+
 if __name__ == '__main__':
     # Test on the local PatchGuard repository itself
     script_dir = os.path.dirname(os.path.abspath(__file__))
