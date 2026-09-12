@@ -406,3 +406,34 @@ Executed real-world SZZ defect extraction on `bottlepy/bottle` (`scratch/externa
 **`APPROVE SZZ FOR REAL-DATA ML INTEGRATION`**  
 The SZZ defect labeler successfully extracted defect labels and complete provenance tracking on a real Python codebase. Labeling semantics, candidate fix detection, revert handling, and multi-signal confidence scoring operated reliably.
 
+
+---
+
+## Phase 6.5 — Real LLM Provider Integration (OpenAI)
+
+Integrated the first real LLM provider (`OpenAIProvider`) into PatchGuard's Phase 6 code change analysis architecture.
+
+### 1. Objective & Architectural Preservation
+* **Provider Abstraction**: Preserved the `LLMProvider` abstract base class in `src/analysis/providers.py`.
+* **Provider Independence**: `LLMCodeAnalyzer` in `src/analysis/analyzer.py` continues depending strictly on `LLMProvider`, keeping `MockLLMProvider` and `OpenAIProvider` fully interchangeable.
+* **Offline Mock Preservation**: `MockLLMProvider` remains functional and untouched.
+
+### 2. OpenAI Provider Implementation (`src/analysis/providers.py`)
+* **SDK / API Approach**: Uses official `openai` Python SDK (v1.0.0+ syntax) Chat Completions API with `OpenAI(api_key=..., timeout=...)`.
+* **Model Configuration**: Configurable model via `OpenAIProvider(model="...")` with default `gpt-4o-mini`.
+* **API Key Handling**: Resolves `OPENAI_API_KEY` strictly from environment variable or constructor override. Throws `MissingAPIKeyError` if key is missing/empty. Never hard-codes or logs secret keys.
+* **Structured Output Mechanism**: Requests structured JSON response text using `response_format={"type": "json_object"}` parameter. Returns raw text to downstream `ResponseParser`.
+* **Timeout & Error Handling**: Bounded 30.0s timeout with application-level exception mapping (`OpenAIProviderError`, `MissingAPIKeyError`).
+
+### 3. Dependencies & Privacy Boundary
+* **Dependencies**: Added `openai>=1.0.0` to `requirements.txt`.
+* **Privacy Boundary**: Documented that `OpenAIProvider` transmits code diff prompt content to third-party endpoints (`api.openai.com`). Diff analysis should be evaluated against sensitivity guidelines.
+
+### 4. Verification & Testing
+* **Test Suite**: Created `tests/test_openai_provider.py` (8 test cases) using `unittest.mock`.
+* **Network Independence**: 100% offline tests; zero real network requests or real API keys used.
+* **Total Passing Tests**: 72/72 tests passing (`python -m unittest discover -s tests`).
+
+### 5. Known Limitations & Next Step
+* **Limitations**: Live calls require external API access and an active `OPENAI_API_KEY`.
+* **Next Phase**: **Phase 6.6 — CLI Integration**

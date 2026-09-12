@@ -12,9 +12,14 @@ The long-term goal of PatchGuard is to serve as an intelligent assistant in deve
 ---
 
 ## 2. Current Project Status
-**Phase 5 Complete — Risk Prediction Engine Completed and Approved**
+**Phase 6.5 Complete — Real LLM Provider Integration (OpenAI)**
 
-PatchGuard features a production-grade, inference-only Risk Prediction Engine (`RiskPredictionEngine`) and CLI tool (`src/cli.py`) that evaluates commit-level defect risk using the locked Phase 4 Logistic Regression model (`models/logistic_regression_real.pkl` @ threshold `0.35`) and StandardScaler (`models/real_data_scaler.pkl`).
+PatchGuard features a complete qualitative LLM code-change analysis pipeline (`src/analysis/`) combining structured git diff extraction, context-budgeted prompt construction, provider abstractions (`MockLLMProvider` and `OpenAIProvider`), JSON response parsing, and non-destructive evidence citation validation.
+
+- **OpenAI Provider**: Supports live qualitative code change analysis via `OpenAIProvider` using OpenAI Python SDK (`gpt-4o-mini` default).
+- **Environment API Key**: Requires `OPENAI_API_KEY` set in the environment for live API calls. Never hard-codes or logs keys.
+- **Privacy & Security Boundary**: Transmitting code diff prompts to third-party LLM APIs (`api.openai.com`) should be evaluated against organization sensitivity policies.
+- **Offline Reliability**: Full automated test suite operates 100% offline via mocked provider clients without network dependencies.
 
 ---
 
@@ -48,7 +53,7 @@ PatchGuard features a production-grade, inference-only Risk Prediction Engine (`
 [ Risk Prediction Engine & CLI Tool (src/cli.py) ] ──► (Phase 5 Completed)
               │
               ▼
-[ LLM Risk Explanation & RAG Context ] ──► (Phase 6 NEXT)
+[ LLM Code-Change Analysis Pipeline (src/analysis/) ] ──► (Phase 6.5 Completed)
               │
               ▼
 [ Developer CI/CD Feedback & Dashboard ]

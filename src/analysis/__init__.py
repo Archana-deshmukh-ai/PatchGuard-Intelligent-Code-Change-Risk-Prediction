@@ -18,11 +18,15 @@ from .schema import (
 )
 from .providers import (
     LLMProvider,
-    MockLLMProvider
+    MockLLMProvider,
+    OpenAIProvider
 )
 from .exceptions import (
     AnalysisError,
-    MalformedLLMResponseError
+    MalformedLLMResponseError,
+    LLMProviderError,
+    OpenAIProviderError,
+    MissingAPIKeyError
 )
 from .prompt import (
     PromptBuilder,
@@ -45,8 +49,12 @@ __all__ = [
     "ALLOWED_REVIEW_PRIORITIES",
     "LLMProvider",
     "MockLLMProvider",
+    "OpenAIProvider",
     "AnalysisError",
     "MalformedLLMResponseError",
+    "LLMProviderError",
+    "OpenAIProviderError",
+    "MissingAPIKeyError",
     "PromptBuilder",
     "PromptResult",
     "ResponseParser",
