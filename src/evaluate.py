@@ -3,6 +3,7 @@ import json
 import joblib
 import numpy as np
 import pandas as pd
+from sklearn.model_selection import train_test_split
 from sklearn.dummy import DummyClassifier
 from sklearn.metrics import (
     accuracy_score,
@@ -16,137 +17,132 @@ from sklearn.metrics import (
 from data_loader import load_and_validate_data, EXPECTED_FEATURES
 from preprocessing import prepare_and_preprocess_data
 
-def evaluate_models(
-    raw_data_path: str, 
-    models_dir: str, 
-    reports_dir: str
-) -> dict:
+def evaluate_all_models(raw_data_path: str, models_dir: str, reports_dir: str) -> dict:
     """
-    Evaluates trained Logistic Regression model against a Dummy (Majority Class) baseline
-    on the unseen test set. Generates comprehensive evaluation metrics, confusion matrix,
-    feature coefficients, and saves report to reports/baseline_results.json.
+    Evaluates Dummy Classifier, Logistic Regression, Random Forest, and XGBoost models
+    on the exact same unseen test split.
     """
-    # 1. Load Data & Preprocess to get exact unseen test split
+    # 1. Load Data & Create Exact Unseen Test Split
     X, y = load_and_validate_data(raw_data_path)
     X_train_scaled, X_test_scaled, y_train, y_test, _ = prepare_and_preprocess_data(X, y)
     
-    # 2. Load Trained Logistic Regression Model
-    model_path = os.path.join(models_dir, 'logistic_regression.pkl')
-    if not os.path.exists(model_path):
-        raise FileNotFoundError(f"Model file not found at: {model_path}. Run train.py first.")
+    # Extract unscaled test features for tree models
+    _, X_test_raw, _, _ = train_test_split(X, y, test_size=0.20, random_state=42, stratify=y)
     
-    lr_model = joblib.load(model_path)
+    # 2. Load Trained Model Artifacts
+    lr_model = joblib.load(os.path.join(models_dir, 'logistic_regression.pkl'))
+    rf_model = joblib.load(os.path.join(models_dir, 'random_forest.pkl'))
+    xgb_model = joblib.load(os.path.join(models_dir, 'xgboost.pkl'))
     
-    # 3. Logistic Regression Predictions
-    lr_y_pred = lr_model.predict(X_test_scaled)
-    lr_y_prob = lr_model.predict_proba(X_test_scaled)[:, 1]
-    
-    # 4. Logistic Regression Metrics
-    lr_acc = accuracy_score(y_test, lr_y_pred)
-    lr_prec = precision_score(y_test, lr_y_pred, zero_division=0)
-    lr_rec = recall_score(y_test, lr_y_pred, zero_division=0)
-    lr_f1 = f1_score(y_test, lr_y_pred, zero_division=0)
-    lr_auc = roc_auc_score(y_test, lr_y_prob)
-    tn, fp, fn, tp = confusion_matrix(y_test, lr_y_pred).ravel()
-    
-    # 5. Dummy Baseline (Majority Class Classifier)
+    # 3. Fit Dummy Reference Classifier on Train Split
     dummy_model = DummyClassifier(strategy='most_frequent')
     dummy_model.fit(X_train_scaled, y_train)
     
-    dummy_y_pred = dummy_model.predict(X_test_scaled)
-    dummy_y_prob = dummy_model.predict_proba(X_test_scaled)[:, 1] if hasattr(dummy_model, "predict_proba") else np.zeros(len(y_test))
-    
-    dummy_acc = accuracy_score(y_test, dummy_y_pred)
-    dummy_prec = precision_score(y_test, dummy_y_pred, zero_division=0)
-    dummy_rec = recall_score(y_test, dummy_y_pred, zero_division=0)
-    dummy_f1 = f1_score(y_test, dummy_y_pred, zero_division=0)
-    dummy_auc = roc_auc_score(y_test, dummy_y_prob) if len(np.unique(dummy_y_prob)) > 1 else 0.5
-    d_tn, d_fp, d_fn, d_tp = confusion_matrix(y_test, dummy_y_pred).ravel()
-    
-    # 6. Feature Coefficients
-    coefficients = dict(zip(EXPECTED_FEATURES, lr_model.coef_[0].tolist()))
-    intercept = float(lr_model.intercept_[0])
-    
-    # 7. Build Evaluation Results Dictionary
-    results = {
-        "dataset": {
-            "total_samples": len(X),
-            "train_samples": len(X_train_scaled),
-            "test_samples": len(X_test_scaled),
-            "feature_names": EXPECTED_FEATURES,
-            "target_name": "bug_introduced"
-        },
-        "models": {
-            "logistic_regression": {
-                "accuracy": float(lr_acc),
-                "precision": float(lr_prec),
-                "recall": float(lr_rec),
-                "f1_score": float(lr_f1),
-                "roc_auc": float(lr_auc),
-                "confusion_matrix": {
-                    "true_negatives": int(tn),
-                    "false_positives": int(fp),
-                    "false_negatives": int(fn),
-                    "true_positives": int(tp)
-                },
-                "intercept": intercept,
-                "coefficients": coefficients
-            },
-            "dummy_baseline": {
-                "strategy": "most_frequent",
-                "accuracy": float(dummy_acc),
-                "precision": float(dummy_prec),
-                "recall": float(dummy_rec),
-                "f1_score": float(dummy_f1),
-                "roc_auc": float(dummy_auc),
-                "confusion_matrix": {
-                    "true_negatives": int(d_tn),
-                    "false_positives": int(d_fp),
-                    "false_negatives": int(d_fn),
-                    "true_positives": int(d_tp)
-                }
-            }
-        }
+    # 4. Generate Predictions & Probabilities (Threshold 0.50)
+    models_dict = {
+        "Dummy Majority": (dummy_model, X_test_scaled),
+        "Logistic Regression": (lr_model, X_test_scaled),
+        "Random Forest": (rf_model, X_test_raw),
+        "XGBoost": (xgb_model, X_test_raw)
     }
     
-    # 8. Save Report JSON
+    results = {
+        "dataset_info": {
+            "total_samples": len(X),
+            "train_samples": len(y_train),
+            "test_samples": len(y_test),
+            "test_class_0_clean": int((y_test == 0).sum()),
+            "test_class_1_bug": int((y_test == 1).sum()),
+            "features_used": EXPECTED_FEATURES
+        },
+        "models": {}
+    }
+    
+    table_rows = []
+    
+    for name, (model, X_eval) in models_dict.items():
+        y_pred = model.predict(X_eval)
+        
+        if hasattr(model, "predict_proba"):
+            y_prob = model.predict_proba(X_eval)[:, 1]
+        else:
+            y_prob = np.zeros(len(y_test))
+            
+        acc = float(accuracy_score(y_test, y_pred))
+        prec = float(precision_score(y_test, y_pred, zero_division=0))
+        rec = float(recall_score(y_test, y_pred, zero_division=0))
+        f1 = float(f1_score(y_test, y_pred, zero_division=0))
+        auc = float(roc_auc_score(y_test, y_prob)) if len(np.unique(y_prob)) > 1 else 0.5
+        tn, fp, fn, tp = confusion_matrix(y_test, y_pred).ravel()
+        pos_preds = int((y_pred == 1).sum())
+        
+        model_res = {
+            "accuracy": acc,
+            "precision": prec,
+            "recall": rec,
+            "f1_score": f1,
+            "roc_auc": auc,
+            "positive_predictions_count": pos_preds,
+            "confusion_matrix": {
+                "true_negatives": int(tn),
+                "false_positives": int(fp),
+                "false_negatives": int(fn),
+                "true_positives": int(tp)
+            }
+        }
+        
+        # Feature importance / coefficients extraction
+        if hasattr(model, "feature_importances_"):
+            importances = dict(zip(EXPECTED_FEATURES, model.feature_importances_.tolist()))
+            model_res["feature_importances"] = importances
+        elif hasattr(model, "coef_"):
+            coefs = dict(zip(EXPECTED_FEATURES, model.coef_[0].tolist()))
+            model_res["coefficients"] = coefs
+            
+        results["models"][name] = model_res
+        table_rows.append({
+            "Model": name,
+            "Accuracy": f"{acc:.4f}",
+            "Precision": f"{prec:.4f}",
+            "Recall": f"{rec:.4f}",
+            "F1-Score": f"{f1:.4f}",
+            "ROC-AUC": f"{auc:.4f}",
+            "Pos Preds (>=0.5)": f"{pos_preds}/60",
+            "Confusion Matrix [TN, FP, FN, TP]": f"[{tn}, {fp}, {fn}, {tp}]"
+        })
+        
+    # 5. Print Comparison Summary Table
+    df_summary = pd.DataFrame(table_rows)
+    
+    print("\n==========================================================================================")
+    print("                      PATCHGUARD MODEL COMPARISON SUMMARY                                 ")
+    print("==========================================================================================")
+    print(f"Test Split: 60 samples (Clean: {(y_test==0).sum()}, Bug-prone: {(y_test==1).sum()})\n")
+    print(df_summary.to_string(index=False))
+    print("==========================================================================================\n")
+    
+    # 6. Print Feature Importances
+    print("--- FEATURE IMPORTANCE ANALYSIS (Tree-Based Models) ---")
+    print(f"{'Feature Name':<35} | {'Random Forest':<15} | {'XGBoost':<15}")
+    print("-" * 70)
+    rf_imp = results["models"]["Random Forest"]["feature_importances"]
+    xgb_imp = results["models"]["XGBoost"]["feature_importances"]
+    
+    for feat in EXPECTED_FEATURES:
+        print(f"{feat:<35} | {rf_imp[feat]:>15.4f} | {xgb_imp[feat]:>15.4f}")
+    print("==========================================================================================\n")
+    
+    # 7. Save Reports
     os.makedirs(reports_dir, exist_ok=True)
-    report_path = os.path.join(reports_dir, 'baseline_results.json')
+    report_path = os.path.join(reports_dir, 'model_comparison.json')
     with open(report_path, 'w') as f:
         json.dump(results, f, indent=4)
         
-    print(f"[Evaluate] Evaluation report saved to: {report_path}")
-    
-    # 9. Console Output Summary
-    print("\n==================================================")
-    print("           MODEL EVALUATION SUMMARY               ")
-    print("==================================================")
-    print(f"Test Set Size: {len(X_test_scaled)} samples (Stratified Split)\n")
-    
-    print("--- DUMMY BASELINE (Majority Class '0') ---")
-    print(f"Accuracy : {dummy_acc:.4f}")
-    print(f"Precision: {dummy_prec:.4f}")
-    print(f"Recall   : {dummy_rec:.4f}")
-    print(f"F1-Score : {dummy_f1:.4f}")
-    print(f"ROC-AUC  : {dummy_auc:.4f}")
-    print(f"Confusion Matrix: [TN={d_tn}, FP={d_fp}, FN={d_fn}, TP={d_tp}]\n")
-    
-    print("--- LOGISTIC REGRESSION BASELINE ---")
-    print(f"Accuracy : {lr_acc:.4f}")
-    print(f"Precision: {lr_prec:.4f}")
-    print(f"Recall   : {lr_rec:.4f}")
-    print(f"F1-Score : {lr_f1:.4f}")
-    print(f"ROC-AUC  : {lr_auc:.4f}")
-    print(f"Confusion Matrix: [TN={tn}, FP={fp}, FN={fn}, TP={tp}]\n")
-    
-    print("--- LOGISTIC REGRESSION COEFFICIENTS ---")
-    print(f"{'Feature':<20} | {'Coefficient':<12}")
-    print("-" * 35)
-    for feat, coef in coefficients.items():
-        print(f"{feat:<20} | {coef:>12.4f}")
-    print(f"{'Intercept (bias)':<20} | {intercept:>12.4f}")
-    print("==================================================\n")
-    
+    # Also save as baseline_results.json for backward compatibility
+    with open(os.path.join(reports_dir, 'baseline_results.json'), 'w') as f:
+        json.dump(results, f, indent=4)
+        
+    print(f"[Evaluate] Comparison report saved to: {report_path}")
     return results
 
 if __name__ == '__main__':
@@ -155,4 +151,4 @@ if __name__ == '__main__':
     models_dir = os.path.abspath(os.path.join(script_dir, '..', 'models'))
     reports_dir = os.path.abspath(os.path.join(script_dir, '..', 'reports'))
     
-    evaluate_models(raw_data_path, models_dir, reports_dir)
+    evaluate_all_models(raw_data_path, models_dir, reports_dir)

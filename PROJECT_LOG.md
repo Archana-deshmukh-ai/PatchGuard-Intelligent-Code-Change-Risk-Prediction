@@ -3,87 +3,60 @@
 ## Project Vision
 **PatchGuard: Intelligent Code Change Risk Prediction**
 
-The long-term goal of PatchGuard is to build a real-world software engineering bug-risk prediction system. The final architecture will analyze code changes (Git commits / Pull Requests), extract software engineering metrics, predict bug probability using Machine Learning, provide LLM-driven risk explanations, leverage RAG over repository documentation/issues/PR history, and integrate into developer CI/CD workflows to give actionable recommendations.
+The long-term goal of PatchGuard is to build a real-world software engineering bug-risk prediction system. The final architecture will analyze code changes (Git commits / Pull Requests), predict bug probability using Machine Learning, provide LLM-driven risk explanations, leverage RAG over repository documentation/issues/PR history, and integrate into developer CI/CD workflows to give actionable recommendations.
 
 ## Current Stage
-**Step 1 Milestone Complete & Rebranded to PatchGuard**
+**Phase 1 Milestone Approved — Isolated Edge-Case Validation Completed**
 
-## Completed Work
-* Rebranded project to **PatchGuard: Intelligent Code Change Risk Prediction**.
-* Established Git repository hygiene (`.gitignore` created to exclude bytecode, virtualenvs, IDE files, and secrets).
-* Updated public [`README.md`](file:///c:/Projects/CODE_project/bug-prediction/README.md) into a living document for GitHub, clearly demarcating synthetic experiment results from real-world claims.
-* Project directory structure finalized (`bug-prediction/` with `data/raw/`, `data/processed/`, `src/`, `models/`, `reports/`, `notebooks/`).
-* Python environment and packages verified (`pandas`, `numpy`, `scikit-learn`, `joblib`).
-* Created [`requirements.txt`](file:///c:/Projects/CODE_project/bug-prediction/requirements.txt) with baseline dependencies.
-* Synthetic dataset generator ([`src/generate_dataset.py`](file:///c:/Projects/CODE_project/bug-prediction/src/generate_dataset.py)) implemented using probabilistic log-odds + Gaussian noise.
-* Synthetic dataset generated ([`data/raw/synthetic_commits.csv`](file:///c:/Projects/CODE_project/bug-prediction/data/raw/synthetic_commits.csv)) containing 300 rows and 6 columns.
-* Full dataset verification completed (shape, null check, class distribution, code_churn identity check).
-* Implemented [`src/data_loader.py`](file:///c:/Projects/CODE_project/bug-prediction/src/data_loader.py): schema validation, null value verification, and feature/target separation ($X$ and $y$).
-* Implemented [`src/preprocessing.py`](file:///c:/Projects/CODE_project/bug-prediction/src/preprocessing.py): stratified 80/20 train-test splitting and `StandardScaler` feature scaling (fitted on train set only to eliminate data leakage).
-* Implemented [`src/train.py`](file:///c:/Projects/CODE_project/bug-prediction/src/train.py): trained Logistic Regression baseline on `X_train_scaled` and saved `models/logistic_regression.pkl` and `models/scaler.pkl`.
-* Implemented [`src/evaluate.py`](file:///c:/Projects/CODE_project/bug-prediction/src/evaluate.py): evaluated Logistic Regression and a `DummyClassifier` (majority class baseline) on the unseen test set (60 samples), saving full results to [`reports/baseline_results.json`](file:///c:/Projects/CODE_project/bug-prediction/reports/baseline_results.json).
-* Implemented [`src/predict.py`](file:///c:/Projects/CODE_project/bug-prediction/src/predict.py): single commit inference script returning prediction class, bug probability, and risk level.
+## Phase 1 Git Repository Extractor (`src/git_extractor.py`)
 
-## Current Dataset
-* **Location**: `data/raw/synthetic_commits.csv`
-* **Rows**: 300
-* **Columns**: 6 (5 features, 1 target)
-* **Feature Names**: `lines_added`, `lines_deleted`, `files_changed`, `functions_changed`, `code_churn`
-* **Target Name**: `bug_introduced` (0 = Clean/Safe, 1 = Bug-prone)
-* **Class Distribution**: 203 Clean (67.67%), 97 Bug-prone (32.33%)
-* **Train/Test Split**: 240 train samples (80%), 60 test samples (20%), stratified by class.
-* **Missing-Value Status**: 0 missing values across all columns.
-* **Code-Churn Identity Check**: `code_churn == lines_added + lines_deleted` verified 100% True.
+Implemented a modular, reusable Git history extraction engine (`GitRepositoryExtractor`) designed to parse any local Git repository into commit-level software engineering features.
 
-## Baseline Experimental Results
+### 1. Extractor Design & Key Features
+* **Native Subprocess Execution**: Uses native `git` CLI commands (`git log`, `git diff-tree --numstat -M`, `git diff-tree -U0 -M`) for zero third-party dependencies and maximum cross-platform speed.
+* **Strict Commit-Time Scoping**: All features are computed strictly using diffs relative to parent commits (`commit~1` to `commit`). Zero future-leakage.
+* **Chronological Order**: Commits are logged in historical sequence (`git log --reverse`).
+* **Flexible Traversal**: Defaults to extracting all non-merge commits. Configurable options for `--first-parent` filtering, custom ref branches, and commit count limits.
+* **Rename & Move Handling**: Uses `-M` flag in `git diff-tree` and custom path parsing to prevent pure renames from inflating line churn or corrupting file/directory counts.
+* **Function Header Context Heuristic**: `functions_changed` is explicitly calculated as a heuristic count of modified function blocks by inspecting `@@ ... @@` diff hunk headers.
 
-### 1. Model Artifacts
-* **Saved Model**: `models/logistic_regression.pkl`
-* **Saved Scaler**: `models/scaler.pkl`
-* **Saved Report**: `reports/baseline_results.json`
+### 2. Extracted Dataset Schema (14 Columns)
+* **Metadata**: `commit_hash` (short), `full_hash`, `commit_timestamp` (ISO 8601), `author`.
+* **10 Features**: `lines_added`, `lines_deleted`, `code_churn`, `files_changed`, `functions_changed`, `num_directories_touched`, `is_test_file_modified`, `avg_lines_changed_per_file`, `max_lines_changed_in_single_file`, `num_source_files_changed`.
 
-### 2. Metrics Comparison (Test Set = 60 Samples)
+---
 
-| Metric | Dummy Baseline (Majority Class '0') | Logistic Regression Baseline |
-| :--- | :---: | :---: |
-| **Accuracy** | 0.6833 (68.33%) | **0.8667 (86.67%)** |
-| **Precision** | 0.0000 | **0.8667 (86.67%)** |
-| **Recall** | 0.0000 | **0.6842 (68.42%)** |
-| **F1-Score** | 0.0000 | **0.7647 (76.47%)** |
-| **ROC-AUC** | 0.5000 | **0.8806 (88.06%)** |
+## Isolated Edge-Case Experiment Verification Report (`scratch/test_repo`)
 
-### 3. Confusion Matrix Breakdown (Test Set = 60 Samples)
-* **Logistic Regression**:
-  * **True Negatives (TN)**: 39 (Clean commits correctly identified as safe)
-  * **False Positives (FP)**: 2 (Safe commits incorrectly flagged as risky)
-  * **False Negatives (FN)**: 6 (Bug-inducing commits missed by model)
-  * **True Positives (TP)**: 13 (Bug-inducing commits correctly caught)
-* **Dummy Classifier**: `TN=41, FP=0, FN=19, TP=0` (Missed all 19 bug-inducing commits).
+An isolated temporary repository was created under `scratch/test_repo` to test controlled edge-case commits without contaminating PatchGuard's repository history.
 
-### 4. Feature Coefficients (Learned Log-Odds Weights)
+| Edge Case Test | Extracted Output | Verification Result |
+| :--- | :--- | :---: |
+| **1. Pure File Rename** | `code_churn = 0`, `lines_added = 0`, `lines_deleted = 0` | **PASSED** (0 fake churn) |
+| **2. Binary File Addition** | `files_changed = 1`, `code_churn = 0`, no crash | **PASSED** |
+| **3. Empty Commit (`--allow-empty`)** | `code_churn = 0`, `files_changed = 0`, `avg_lines = 0` | **PASSED** |
+| **4. Merge Commit Handling** | Skipped 1 merge commit when `include_merges=False` | **PASSED** |
+| **5. Test File Detection** | `is_test_file_modified = 1` for `tests/test_core.py` | **PASSED** |
+| **6. Multi-Directory Sprawl** | `num_directories_touched = 2` for `pkg/` and `ui/` | **PASSED** |
+| **7. Churn Distribution (Avg & Max)**| `avg_lines = 52.5`, `max_lines = 100` (100-line single file) | **PASSED** |
+| **8. Chronological Sorting** | `commit_timestamp` strictly sorted = `True` | **PASSED** |
 
-| Feature Name | Coefficient | Interpretation |
-| :--- | :---: | :--- |
-| `functions_changed` | **+0.7551** | Strongest positive association with predicted bug log-odds |
-| `code_churn` | **+0.2458** | Positive association with risk log-odds |
-| `lines_added` | **+0.1770** | Positive association with risk log-odds |
-| `lines_deleted` | **+0.1590** | Positive association with risk log-odds |
-| `files_changed` | **-0.0104** | Slightly negative association (holding churn/functions constant) |
-| *Intercept (bias)* | **-0.8198** | Base log-odds bias reflecting majority clean class |
+---
 
-### 5. Single Commit Prediction Test
-* **Test Input**: `lines_added=120`, `lines_deleted=30`, `files_changed=6`, `functions_changed=10`, `code_churn=150`
-* **Prediction Label**: **Bug-prone (Class 1)**
-* **Bug Probability**: **0.8417**
-* **Risk Level**: **HIGH**
+## Multi-Model Comparison Baseline Summary (Previous Milestone)
 
-## Important Engineering & Git Decisions
-* **Branding**: Rebranded project to PatchGuard.
-* **Git Hygiene**: Added `.gitignore` to prevent tracking bytecode, virtualenvs, OS junk, and IDE files.
-* **Artifact Tracking Strategy**:
-  * `data/raw/synthetic_commits.csv` (15 KB) & `models/*.pkl` (<5 KB) are small and included in initial commit to allow instant out-of-the-box reproduction for cloned repositories.
-  * `data/processed/` files are tracked for pipeline inspection.
-* **Living README**: `README.md` formatted for public GitHub viewing with clear synthetic experiment disclaimers.
+Evaluated 4 baseline models on the exact same 10-feature dataset split (300 samples: 240 train / 60 unseen test):
+
+| Model | Accuracy | Precision | Recall | F1-Score | ROC-AUC | Pos Preds (>=0.50) | Confusion Matrix [TN, FP, FN, TP] |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| **Dummy Majority Reference** | 0.7333 | 0.0000 | 0.0000 | 0.0000 | 0.5000 | 0 / 60 | `[44, 0, 16, 0]` |
+| **Logistic Regression** (Scaled) | **0.7500** | **0.6667** | 0.1250 | 0.2105 | **0.6690** | 3 / 60 | `[43, 1, 14, 2]` |
+| **Random Forest** (Unscaled) | 0.6500 | 0.1429 | 0.0625 | 0.0870 | 0.5540 | 7 / 60 | `[38, 6, 15, 1]` |
+| **XGBoost** (Unscaled) | 0.7000 | 0.3750 | **0.1875** | **0.2500** | 0.6207 | 8 / 60 | `[39, 5, 13, 3]` |
+
+*Technical note on Random Forest*: Random Forest performed poorly on the small synthetic dataset; additional validation would be required to determine whether overfitting contributed.
+
+---
 
 ## Development History
 ### Step 1A — Project Understanding
@@ -96,7 +69,16 @@ Completed. Created project structure, requirements, README, dataset generator, a
 Completed. Created `src/data_loader.py` and `src/preprocessing.py`, performed data validation, feature scaling, stratified splitting, and saved processed CSVs.
 
 ### Step 1D — Baseline Model Training & Evaluation
-Completed. Implemented `src/train.py`, `src/evaluate.py`, and `src/predict.py`. Evaluated Logistic Regression vs Dummy Baseline on unseen test set, generated `reports/baseline_results.json`, and tested single commit inference.
+Completed. Implemented `src/train.py`, `src/evaluate.py`, and `src/predict.py`. Evaluated Logistic Regression vs Dummy Baseline on unseen test set.
 
 ### Step 1 Milestone — Rebranding to PatchGuard & Git Hygiene
-Completed. Rebranded project to PatchGuard, set up `.gitignore`, updated `README.md` and `PROJECT_LOG.md`, and prepared first Git commit milestone.
+Completed. Rebranded project to PatchGuard, set up `.gitignore`, updated `README.md` and `PROJECT_LOG.md`.
+
+### Milestone 2 — Feature Representation Expansion (10 Features) & Controlled Diagnostic
+Completed. Expanded to 10 features, performed controlled diagnostic experiment, corrected technical wording on multicollinearity, and evaluated threshold sensitivity.
+
+### Milestone 3 — Multi-Model Comparison Baseline
+Completed. Added `xgboost` dependency to `requirements.txt`, trained and evaluated Logistic Regression, Random Forest, and XGBoost models on unseen test split, and analyzed Gini and Gain feature importances.
+
+### Milestone 4 — Real Git Repository Mining (Phase 1 Extractor) & Isolated Edge-Case Validation
+Completed. Implemented `src/git_extractor.py`, created an isolated test repository in `scratch/test_repo`, verified all 8 edge cases (renames, binary files, empty commits, merge filtering, directory counting, test file detection, avg/max line churn), verified chronological ordering, and updated `PROJECT_LOG.md`.

@@ -5,15 +5,20 @@ import pandas as pd
 EXPECTED_FEATURES: List[str] = [
     'lines_added',
     'lines_deleted',
+    'code_churn',
     'files_changed',
     'functions_changed',
-    'code_churn'
+    'num_directories_touched',
+    'is_test_file_modified',
+    'avg_lines_changed_per_file',
+    'max_lines_changed_in_single_file',
+    'num_source_files_changed'
 ]
 TARGET_COLUMN: str = 'bug_introduced'
 
 def load_and_validate_data(filepath: str) -> Tuple[pd.DataFrame, pd.Series]:
     """
-    Loads dataset from CSV, validates column schema and data integrity,
+    Loads dataset from CSV, validates column schema and data integrity for all 10 features,
     and splits into features (X) and target (y).
     
     Args:
@@ -57,7 +62,7 @@ if __name__ == '__main__':
     raw_data_path = os.path.abspath(os.path.join(script_dir, '..', 'data', 'raw', 'synthetic_commits.csv'))
     
     X, y = load_and_validate_data(raw_data_path)
-    print("\nSample Features X (head):")
+    print("\nSample Features X (head 5):")
     print(X.head())
-    print("\nSample Target y (head):")
+    print("\nSample Target y (head 5):")
     print(y.head())
