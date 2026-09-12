@@ -1,0 +1,94 @@
+{
+  "metadata": {
+    "model_name": "LogisticRegression",
+    "model_artifact": "C:\\Projects\\CODE_project\\bug-prediction\\models\\logistic_regression_real.pkl",
+    "scaler_artifact": "C:\\Projects\\CODE_project\\bug-prediction\\models\\real_data_scaler.pkl",
+    "locked_threshold": 0.35,
+    "evaluation_timestamp": "2026-09-12T16:03:14.778008",
+    "test_sample_count": 253,
+    "actual_positives": 51,
+    "actual_negatives": 202,
+    "actual_positive_rate": 0.2016,
+    "predicted_positives": 101,
+    "predicted_positive_rate": 0.3992
+  },
+  "final_test_metrics": {
+    "accuracy": 0.6522,
+    "precision": 0.3168,
+    "recall": 0.6275,
+    "f1": 0.4211,
+    "roc_auc": 0.6709,
+    "confusion_matrix": [
+      [
+        133,
+        69
+      ],
+      [
+        19,
+        32
+      ]
+    ],
+    "tp": 32,
+    "fp": 69,
+    "tn": 133,
+    "fn": 19,
+    "probability_stats": {
+      "min": 0.2012,
+      "max": 1.0,
+      "mean": 0.3909,
+      "median": 0.3184
+    }
+  },
+  "dummy_baseline_test_metrics": {
+    "accuracy": 0.7984,
+    "f1": 0.0,
+    "roc_auc": 0.5
+  },
+  "validation_vs_test_comparison": {
+    "accuracy": {
+      "validation": 0.7668,
+      "test": 0.6522,
+      "difference": -0.1146
+    },
+    "precision": {
+      "validation": 0.5851,
+      "test": 0.3168,
+      "difference": -0.2683
+    },
+    "recall": {
+      "validation": 0.7333,
+      "test": 0.6275,
+      "difference": -0.1058
+    },
+    "f1": {
+      "validation": 0.6509,
+      "test": 0.4211,
+      "difference": -0.2298
+    },
+    "roc_auc": {
+      "validation": 0.7924,
+      "test": 0.6709,
+      "difference": -0.1215
+    }
+  },
+  "reproducibility_checks": {
+    "test_row_count_exact_253": true,
+    "unique_test_commit_hashes": true,
+    "scaler_fit_on_train_only": true,
+    "model_fit_on_train_only": true,
+    "locked_threshold_exact_0_35": true,
+    "zero_test_threshold_sweeps": true,
+    "zero_test_model_selection": true,
+    "zero_szz_provenance_in_features": true,
+    "zero_future_history_leakage": true,
+    "test_csv_unmodified": true
+  },
+  "notes_and_limitations": [
+    "Single benchmark repository evaluation (bottlepy/bottle).",
+    "SZZ-derived labels contain historical noise (e.g. cosmetic edits within fixes).",
+    "Temporal class distribution shift: positive rate dropped from 45.05% (Train) to 29.64% (Val) to 20.16% (Test).",
+    "Probabilities represent model discrimination scores and have not been formally calibrated.",
+    "Test set size is N=253 commits.",
+    "Commit-level diff metrics do not capture deep semantic or architectural changes."
+  ]
+}

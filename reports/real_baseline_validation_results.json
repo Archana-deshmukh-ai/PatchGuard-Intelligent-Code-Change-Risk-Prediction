@@ -1,0 +1,263 @@
+{
+  "metadata": {
+    "dataset": "bottle_real_dataset",
+    "train_samples": 1181,
+    "train_positives": 532,
+    "train_negatives": 649,
+    "val_samples": 253,
+    "val_positives": 75,
+    "val_negatives": 178,
+    "test_used": false,
+    "classification_threshold": 0.5
+  },
+  "models": {
+    "dummy": {
+      "model_name": "DummyClassifier",
+      "artifact_path": "C:\\Projects\\CODE_project\\bug-prediction\\models\\dummy_classifier.pkl",
+      "features_used": "raw",
+      "train_metrics": {
+        "split_name": "TRAIN",
+        "sample_count": 1181,
+        "positive_count": 532,
+        "negative_count": 649,
+        "predicted_positive_count": 0,
+        "accuracy": 0.5495,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "roc_auc": 0.5,
+        "confusion_matrix": [
+          [
+            649,
+            0
+          ],
+          [
+            532,
+            0
+          ]
+        ],
+        "probability_stats": {
+          "min": 0.0,
+          "max": 0.0,
+          "mean": 0.0,
+          "median": 0.0
+        }
+      },
+      "validation_metrics": {
+        "split_name": "VALIDATION",
+        "sample_count": 253,
+        "positive_count": 75,
+        "negative_count": 178,
+        "predicted_positive_count": 0,
+        "accuracy": 0.7036,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "roc_auc": 0.5,
+        "confusion_matrix": [
+          [
+            178,
+            0
+          ],
+          [
+            75,
+            0
+          ]
+        ],
+        "probability_stats": {
+          "min": 0.0,
+          "max": 0.0,
+          "mean": 0.0,
+          "median": 0.0
+        }
+      },
+      "overfitting_diagnostic": "no extreme overfitting gap"
+    },
+    "logistic_regression": {
+      "model_name": "LogisticRegression",
+      "artifact_path": "C:\\Projects\\CODE_project\\bug-prediction\\models\\logistic_regression_real.pkl",
+      "features_used": "scaled",
+      "train_metrics": {
+        "split_name": "TRAIN",
+        "sample_count": 1181,
+        "positive_count": 532,
+        "negative_count": 649,
+        "predicted_positive_count": 362,
+        "accuracy": 0.6918,
+        "precision": 0.732,
+        "recall": 0.4981,
+        "f1": 0.5928,
+        "roc_auc": 0.7619,
+        "confusion_matrix": [
+          [
+            552,
+            97
+          ],
+          [
+            267,
+            265
+          ]
+        ],
+        "probability_stats": {
+          "min": 0.0,
+          "max": 1.0,
+          "mean": 0.4504,
+          "median": 0.3642
+        }
+      },
+      "validation_metrics": {
+        "split_name": "VALIDATION",
+        "sample_count": 253,
+        "positive_count": 75,
+        "negative_count": 178,
+        "predicted_positive_count": 56,
+        "accuracy": 0.7668,
+        "precision": 0.6429,
+        "recall": 0.48,
+        "f1": 0.5496,
+        "roc_auc": 0.7924,
+        "confusion_matrix": [
+          [
+            158,
+            20
+          ],
+          [
+            39,
+            36
+          ]
+        ],
+        "probability_stats": {
+          "min": 0.2083,
+          "max": 1.0,
+          "mean": 0.3978,
+          "median": 0.325
+        }
+      },
+      "overfitting_diagnostic": "no extreme overfitting gap"
+    },
+    "random_forest": {
+      "model_name": "RandomForest",
+      "artifact_path": "C:\\Projects\\CODE_project\\bug-prediction\\models\\random_forest_real.pkl",
+      "features_used": "raw",
+      "train_metrics": {
+        "split_name": "TRAIN",
+        "sample_count": 1181,
+        "positive_count": 532,
+        "negative_count": 649,
+        "predicted_positive_count": 472,
+        "accuracy": 0.9255,
+        "precision": 0.9703,
+        "recall": 0.8609,
+        "f1": 0.9124,
+        "roc_auc": 0.9639,
+        "confusion_matrix": [
+          [
+            635,
+            14
+          ],
+          [
+            74,
+            458
+          ]
+        ],
+        "probability_stats": {
+          "min": 0.0,
+          "max": 1.0,
+          "mean": 0.4533,
+          "median": 0.29
+        }
+      },
+      "validation_metrics": {
+        "split_name": "VALIDATION",
+        "sample_count": 253,
+        "positive_count": 75,
+        "negative_count": 178,
+        "predicted_positive_count": 82,
+        "accuracy": 0.7431,
+        "precision": 0.561,
+        "recall": 0.6133,
+        "f1": 0.586,
+        "roc_auc": 0.7481,
+        "confusion_matrix": [
+          [
+            142,
+            36
+          ],
+          [
+            29,
+            46
+          ]
+        ],
+        "probability_stats": {
+          "min": 0.0,
+          "max": 0.99,
+          "mean": 0.3644,
+          "median": 0.27
+        }
+      },
+      "overfitting_diagnostic": "possible overfitting signal; requires further validation"
+    },
+    "xgboost": {
+      "model_name": "XGBoost",
+      "artifact_path": "C:\\Projects\\CODE_project\\bug-prediction\\models\\xgboost_real.pkl",
+      "features_used": "raw",
+      "train_metrics": {
+        "split_name": "TRAIN",
+        "sample_count": 1181,
+        "positive_count": 532,
+        "negative_count": 649,
+        "predicted_positive_count": 438,
+        "accuracy": 0.9035,
+        "precision": 0.9772,
+        "recall": 0.8045,
+        "f1": 0.8825,
+        "roc_auc": 0.9588,
+        "confusion_matrix": [
+          [
+            639,
+            10
+          ],
+          [
+            104,
+            428
+          ]
+        ],
+        "probability_stats": {
+          "min": 0.0006,
+          "max": 0.9998,
+          "mean": 0.4505,
+          "median": 0.2892
+        }
+      },
+      "validation_metrics": {
+        "split_name": "VALIDATION",
+        "sample_count": 253,
+        "positive_count": 75,
+        "negative_count": 178,
+        "predicted_positive_count": 73,
+        "accuracy": 0.7708,
+        "precision": 0.6164,
+        "recall": 0.6,
+        "f1": 0.6081,
+        "roc_auc": 0.7628,
+        "confusion_matrix": [
+          [
+            150,
+            28
+          ],
+          [
+            30,
+            45
+          ]
+        ],
+        "probability_stats": {
+          "min": 0.0054,
+          "max": 0.9993,
+          "mean": 0.3715,
+          "median": 0.2306
+        }
+      },
+      "overfitting_diagnostic": "possible overfitting signal; requires further validation"
+    }
+  }
+}

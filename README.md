@@ -1,6 +1,6 @@
 # PatchGuard: Intelligent Code Change Risk Prediction
 
-Predicting defect-inducing code changes using machine learning, code churn analysis, and contextual intelligence.
+Predicting defect-inducing code changes using machine learning, Git repository mining, SZZ defect labeling, code churn analysis, and contextual intelligence.
 
 ---
 
@@ -11,193 +11,204 @@ The long-term goal of PatchGuard is to serve as an intelligent assistant in deve
 
 ---
 
-## 2. Problem Statement
-Software defects introduced during active development are significantly more expensive to fix after being deployed to production. Manual code reviews are critical, but human reviewers can miss subtle bug-inducing patterns in large or complex commits.
+## 2. Current Project Status
+**Phase 4 Complete — Real-Data ML Pipeline Completed and Approved**
 
-PatchGuard addresses this challenge by providing automated, data-driven bug risk scores at the moment code changes are committed, enabling developers to prioritize code reviews and focus testing on high-risk modifications.
-
----
-
-## 3. Why PatchGuard
-* **Early Defect Detection**: Catch potential bugs before code is merged into release branches.
-* **Objective Risk Scoring**: Quantify commit risk based on code churn, file dispersion, and structural modifications.
-* **Developer-Centric Design**: Designed to integrate into CI/CD pipelines without interrupting developer velocity.
-* **Progressive Architecture**: Built modularly to evolve from simple linear baselines to advanced tree-based models and LLM-driven contextual explanations.
+PatchGuard has evolved from synthetic baseline experiments to a real-world software engineering ML pipeline trained on real Git repository history mined via the SZZ defect-labeling algorithm on the mature open-source benchmark repository `bottlepy/bottle` (1,990 commits).
 
 ---
 
-## 4. How It Works (System Vision)
+## 3. How It Works (System Vision)
 
 ```text
 [ Git Commit / Pull Request ]
               │
               ▼
-[ Repository Mining & Feature Extraction ]
+[ Real Git Feature Extraction (src/git_extractor.py) ]
               │
               ▼
-[ Machine Learning Risk Model ]
+[ SZZ Defect-Labeling Pipeline (src/szz_labeler.py) ]
               │
               ▼
-[ Bug Probability & Classification ] ──► (PatchGuard Baseline Stage)
+[ Temporal Train / Validation / Test Splitting ]
+              │
+              ▼
+[ Model-Aware Feature Preprocessing (src/preprocess_real_data.py) ]
+              │
+              ▼
+[ Machine Learning Risk Model (src/train_real_baseline.py) ]
+              │
+              ▼
+[ Validation Model Selection & Threshold Locking (src/select_model.py) ]
+              │
+              ▼
+[ Unbiased Final Test Evaluation (src/evaluate_final_test.py) ] ──► (Phase 4 Completed)
+              │
+              ▼
+[ Risk Prediction Engine & Risk Levels ] ──► (Phase 5 NEXT)
               │
               ▼
 [ LLM Risk Explanation & RAG Context ] ──► (Future Stage)
               │
               ▼
-[ Developer CI/CD Feedback & Report ]
+[ Developer CI/CD Feedback & Dashboard ]
 ```
 
 ---
 
-## 5. Current Stage: Baseline ML Pipeline
-We are currently at **Step 1 (ML Baseline)**. In this stage, PatchGuard establishes a clean, reproducible binary classification pipeline using **Logistic Regression** to predict whether a commit is bug-prone (`1`) or clean (`0`).
+## 4. The 10 Commit-Time Model Features
 
-### Initial 5 Features
-| Feature | Description | Type |
-| :--- | :--- | :---: |
-| `lines_added` | Total new lines of code added | Integer |
-| `lines_deleted` | Total lines of code removed | Integer |
-| `files_changed` | Total number of modified files | Integer |
-| `functions_changed` | Total number of functions/methods modified | Integer |
-| `code_churn` | Total code volatility (`lines_added + lines_deleted`) | Integer |
+| # | Feature Name | Description | Type |
+| :--- | :--- | :--- | :---: |
+| 1 | `lines_added` | Total new lines of code added in the commit | Integer |
+| 2 | `lines_deleted` | Total lines of code removed in the commit | Integer |
+| 3 | `code_churn` | Total volatility (`lines_added + lines_deleted`) | Integer |
+| 4 | `files_changed` | Total number of modified files | Integer |
+| 5 | `functions_changed` | Estimated function/method signatures modified | Integer |
+| 6 | `num_directories_touched` | Distinct directory paths modified | Integer |
+| 7 | `is_test_file_modified` | Binary indicator (1 if test file modified, else 0) | Integer |
+| 8 | `avg_lines_changed_per_file` | Average line churn per modified file | Float |
+| 9 | `max_lines_changed_in_single_file` | Maximum line churn in a single file | Integer |
+| 10 | `num_source_files_changed` | Total standard source code files modified | Integer |
+
+> **Leakage Protection Rule**: Commit hashes (`commit_hash`), timestamps (`commit_timestamp`), and retrospective SZZ provenance fields (`fixing_commit_hash`, `fixing_issue_id`, `label_confidence`, `label_source`, `label_semantics`, `traced_lines_count`) are strictly excluded from ML model features.
 
 ---
 
-## 6. Dataset & Synthetic Baseline Notice
-> [!IMPORTANT]
-> The current dataset stored in `data/raw/synthetic_commits.csv` (300 samples) is **synthetic** and generated strictly to verify the ML pipeline engineering. It reflects plausible relationships (e.g., larger changes tend to have higher risk with realistic noise), but does **not** represent real-world repository behavior. The pipeline is designed so that this dataset can later be replaced with mined Git history (via SZZ algorithm) without changing downstream pipeline code.
+## 5. Target Label Semantics (SZZ Algorithm)
 
----
-
-## 7. Baseline Experiment Results
+Target Variable: `bug_introduced`
+* `1`: **SZZ-identified bug-introducing commit** (Evidence proves modified lines were later deleted/modified in a bug-fixing commit).
+* `0`: **No SZZ evidence that the commit introduced a later fixed defect** (No historical evidence found).
 
 > [!NOTE]
-> The metrics below reflect model performance on the **synthetic baseline test set (60 samples)**. They demonstrate pipeline functionality, not real-world defect prediction accuracy.
+> Label `0` indicates *no identified defect evidence* in historical git trace; it does **not** guarantee a commit is logically "bug-free".
 
-### Metrics Comparison (Test Set = 60 Samples)
+---
 
-| Metric | Dummy Baseline (Majority Class '0') | PatchGuard Baseline (Logistic Regression) |
+## 6. Phase 4 Real-Data Benchmark Results (`bottlepy/bottle`)
+
+The pipeline was evaluated on `bottlepy/bottle` using a strict chronological split:
+* **TRAIN**: 1,181 oldest commits (70%) — $y=1$ rate: 45.05%
+* **VALIDATION**: 253 middle commits (15%) — $y=1$ rate: 29.64%
+* **TEST**: 253 newest commits (15%) — $y=1$ rate: 20.16% (Unseen chronological test period)
+
+### Final Locked Evaluation Results (Test Set $N=253$, Locked Model: `LogisticRegression` @ Threshold `0.35`)
+
+| Metric | Dummy Baseline (Majority Class) | Locked PatchGuard Model (`LogisticRegression` @ 0.35) |
 | :--- | :---: | :---: |
-| **Accuracy** | 0.6833 | **0.8667** |
-| **Precision** | 0.0000 | **0.8667** |
-| **Recall** | 0.0000 | **0.6842** |
-| **F1-Score** | 0.0000 | **0.7647** |
-| **ROC-AUC** | 0.5000 | **0.8806** |
+| **Accuracy** | **0.7984** | **0.6522** |
+| **Precision** | 0.0000 | **0.3168** |
+| **Recall** | 0.0000 | **0.6275** (Catches 32 / 51 test defect commits) |
+| **F1-Score** | 0.0000 | **0.4211** |
+| **ROC-AUC** | 0.5000 | **0.6709** |
+| **Predicted Positives** | 0 / 253 | **101 / 253** |
 
-### Confusion Matrix (Logistic Regression)
-* **True Negatives (TN)**: 39 (Clean commits correctly identified)
-* **False Positives (FP)**: 2 (Safe commits flagged as risky)
-* **False Negatives (FN)**: 6 (Bug-inducing commits missed by model)
-* **True Positives (TP)**: 13 (Bug-inducing commits correctly caught)
-
----
-
-## 8. Example Prediction Output
-
-Running inference on a new hypothetical commit (`src/predict.py`):
-
-```bash
-python src/predict.py
-```
-
-**Output**:
+### Confusion Matrix (Test Set)
 ```text
-==================================================
-       SINGLE COMMIT RISK INFERENCE TEST          
-==================================================
-Input Code Change  : {'lines_added': 120, 'lines_deleted': 30, 'files_changed': 6, 'functions_changed': 10, 'code_churn': 150}
-Prediction Label   : Bug-prone (Class 1)
-Bug Probability    : 0.8417
-Risk Level         : HIGH
---------------------------------------------------
-Note: Risk level boundaries (0-0.33 LOW, 0.33-0.66 MEDIUM, 0.66-1.0 HIGH)
-are engineering choices for pipeline testing, not calibrated thresholds.
-==================================================
+               Predicted Negative (0)    Predicted Positive (1)
+Actual (0):            133                       69            (TN=133, FP=69)
+Actual (1):             19                       32            (FN=19,  TP=32)
 ```
+
+> [!IMPORTANT]
+> **Interpretation**: The majority baseline achieves higher accuracy (79.84%) simply by predicting 0 for all commits due to class imbalance in recent history. However, the majority baseline has **zero recall** and cannot detect any bugs. PatchGuard's locked candidate model provides non-trivial predictive signal (Recall **62.75%**, F1 **42.11%**, ROC-AUC **0.6709**), successfully detecting 32 out of 51 defect-introducing commits in unseen history.
 
 ---
 
-## 9. Installation & Reproduction Guide
-
-### Prerequisites
-* Python 3.10+
-
-### Setup
-```bash
-# Clone the repository
-git clone https://github.com/your-username/PatchGuard.git
-cd PatchGuard/bug-prediction
-
-# Install dependencies
-pip install -r requirements.txt
-```
-
-### Reproducing the Pipeline Step-by-Step
-```bash
-# 1. Generate Synthetic Dataset (300 commit samples)
-python src/generate_dataset.py
-
-# 2. Test Data Loader Validation & Schema Checks
-python src/data_loader.py
-
-# 3. Perform Preprocessing (Stratified Train/Test Split & StandardScaler)
-python src/preprocessing.py
-
-# 4. Train Baseline Logistic Regression Model
-python src/train.py
-
-# 5. Evaluate Baseline against Dummy Majority Classifier
-python src/evaluate.py
-
-# 6. Test Single Commit Risk Inference
-python src/predict.py
-```
-
----
-
-## 10. Project Structure
+## 7. Project Structure
 
 ```text
 bug-prediction/
 ├── data/
 │   ├── raw/
-│   │   └── synthetic_commits.csv       # Raw input dataset
+│   │   ├── bottle_git_commits.csv       # Extracted commit features for bottlepy/bottle
+│   │   ├── patchguard_git_commits.csv   # Mined commits from PatchGuard repo
+│   │   ├── synthetic_commits.csv        # Phase 1 synthetic dataset
+│   │   └── szz_bottle_labeled_commits.csv # SZZ labels & audit provenance
 │   └── processed/
-│       ├── test_processed.csv          # Scaled test split
-│       └── train_processed.csv         # Scaled train split
+│       ├── bottle_real_dataset.csv      # Complete joined real ML dataset (N=1,687)
+│       ├── bottle_train.csv             # Chronological train split (N=1,181)
+│       ├── bottle_validation.csv        # Chronological validation split (N=253)
+│       └── bottle_test.csv              # Chronological unseen test split (N=253)
 ├── models/
-│   ├── logistic_regression.pkl         # Trained model artifact
-│   └── scaler.pkl                      # Fitted StandardScaler artifact
-├── notebooks/                          # EDA & experimental notebooks
+│   ├── dummy_classifier.pkl             # Majority class baseline
+│   ├── logistic_regression_real.pkl     # Locked real-data Logistic Regression model
+│   ├── random_forest_real.pkl           # Trained real-data Random Forest model
+│   ├── real_data_scaler.pkl             # StandardScaler fitted ON TRAIN ONLY
+│   └── xgboost_real.pkl                 # Trained real-data XGBoost model
 ├── reports/
-│   └── baseline_results.json           # Evaluation metrics JSON report
+│   ├── final_test_predictions.csv       # Test commit predictions & probabilities
+│   ├── final_test_results.json          # Machine-readable final test evaluation report
+│   ├── real_baseline_validation_results.json # Baseline validation metrics
+│   ├── threshold_analysis_validation.csv # Validation threshold sweep data
+│   └── threshold_analysis_validation.json # Validation threshold sweep report
 ├── src/
-│   ├── data_loader.py                  # Schema validation & data loader
-│   ├── evaluate.py                     # Evaluation & baseline comparison
-│   ├── generate_dataset.py             # Synthetic dataset generator
-│   ├── predict.py                      # Single commit risk prediction CLI
-│   ├── preprocessing.py                # Train/test split & feature scaling
-│   └── train.py                        # Logistic Regression model training
-├── .gitignore                          # Git exclusion rules
-├── PROJECT_LOG.md                      # Internal engineering log & memory
-├── README.md                           # Public repository documentation
-└── requirements.txt                    # Project dependencies
+│   ├── build_dataset.py                 # Real dataset builder (features + SZZ labels)
+│   ├── data_loader.py                   # Data loader and schema validator
+│   ├── evaluate_final_test.py           # Phase 4.6 final locked test evaluator
+│   ├── git_extractor.py                 # Phase 2 real Git repository extractor
+│   ├── predict.py                       # Single commit risk inference CLI
+│   ├── preprocess_real_data.py          # Phase 4.3 model-aware feature preprocessor
+│   ├── preprocessing.py                 # Baseline preprocessor
+│   ├── select_model.py                  # Phase 4.5 validation threshold selector
+│   ├── szz_labeler.py                   # Phase 3 SZZ defect-labeling pipeline
+│   ├── temporal_split.py                # Phase 4.2 chronological dataset splitter
+│   └── train_real_baseline.py           # Phase 4.4 baseline model trainer
+├── .gitignore                           # Git exclusion rules
+├── PROJECT_LOG.md                       # Comprehensive engineering decision log
+├── README.md                            # Public repository documentation
+└── requirements.txt                     # Project dependencies
 ```
 
 ---
 
-## 11. Current Limitations
-1. **Synthetic Data**: The baseline relies on synthetic data designed to test pipeline flow. Real software engineering distributions have significantly higher noise and non-linearity.
-2. **Coarse Metadata Features**: The model currently evaluates lines touched and file counts, ignoring actual code syntax, AST nodes, and semantic changes.
-3. **Linear Decision Boundary**: Logistic Regression assumes linear log-odds relationships.
+## 8. Reproducing the Real-Data Pipeline Step-by-Step
+
+```bash
+# 1. Mine commit-time features from local benchmark repository
+python scratch/test_bottle_extractor.py
+
+# 2. Build joined real ML dataset (features + SZZ labels)
+python src/build_dataset.py
+
+# 3. Create chronological train/validation/test split (70/15/15)
+python src/temporal_split.py
+
+# 4. Preprocess features and fit StandardScaler on TRAIN ONLY
+python src/preprocess_real_data.py
+
+# 5. Train baseline models on TRAIN split
+python src/train_real_baseline.py
+
+# 6. Run validation threshold analysis and model selection
+python src/select_model.py
+
+# 7. Execute ONE final unbiased evaluation on unseen TEST split
+python src/evaluate_final_test.py
+```
 
 ---
 
-## 12. Project Roadmap
-- [x] **Step 1: Baseline ML System** (Logistic Regression, synthetic dataset, pipeline engineering, evaluation metrics).
-- [ ] **Step 2: Enhanced Feature Engineering** (Process coupling, author experience, commit frequency, time metrics).
-- [ ] **Step 3: Real Repository Data Mining** (Git commit extraction, issue tracker linking, SZZ defect-labeling algorithm).
-- [ ] **Step 4: Tree-Based ML Models** (Random Forest, XGBoost baseline comparison).
-- [ ] **Step 5: LLM Risk Explanations** (Generating human-readable explanations for flagged changes).
-- [ ] **Step 6: RAG Integration** (Retrieving context from repository docs, issues, and PR history).
-- [ ] **Step 7: Developer-Facing System** (CLI tool / CI/CD pipeline integration).
+## 9. Current Limitations & Key Learnings
+
+1. **Shallow Feature Representation**: Commit-level diff metrics capture commit size and dispersion, but do not capture deep AST structure or semantic code logic.
+2. **Detection of Small Patches**: Small, single-file bug fixes produce small diff footprints, making them harder for churn metrics alone to detect (leading to False Negatives).
+3. **Refactoring Noise**: Large structural refactorings exhibit high churn and multi-file touches, increasing predicted risk scores even when no defects are introduced (leading to False Positives).
+4. **Temporal Class Prevalence Shift**: Defect-introducing commit frequency decreases as codebases mature (from 45% in early history to 20% in recent commits), affecting fixed-threshold precision across multi-year timeframes.
+5. **Uncalibrated Probability Scores**: Model probabilities represent discrimination scores and have not yet been formally calibrated into real-world probabilities.
+
+---
+
+## 10. Project Roadmap
+
+- [x] **Phase 1: Project & ML Foundation** — Supervised binary classification framing, synthetic pipeline verification, baseline evaluation metrics.
+- [x] **Phase 2: Real Git Repository Mining** — Subprocess-based `GitRepositoryExtractor` parsing 10 commit-time diff features across Git history.
+- [x] **Phase 3: Defect Labeling / SZZ** — Retrospective line-blame tracing (`SZZDefectLabeler`), multi-signal confidence scoring, tested on `bottlepy/bottle`.
+- [x] **Phase 4: Real-Data ML Pipeline** — Dataset construction, 70/15/15 chronological split, Train-only scaling, multi-model baseline training, validation threshold selection, final locked test evaluation.
+- [ ] **Phase 5: Risk Prediction Engine** *(NEXT)* — Turning the ML risk model into a reusable prediction module (Probability $\rightarrow$ Risk Level $\rightarrow$ Signal Breakdown $\rightarrow$ Actionable Recommendation).
+- [ ] **Phase 6: LLM Code-Change Analysis** — Generating human-readable risk explanations from code diffs using LLMs.
+- [ ] **Phase 7: RAG / Repository Intelligence** — Retrieving context from repository docs, historical issues, and PR history.
+- [ ] **Phase 8: Developer Dashboard** — Interactive UI for commit risk monitoring and audit reports.
+- [ ] **Phase 9: GitHub / CI-CD Integration** — Automated PR risk bot and workflow status checks.
+- [ ] **Phase 10: Productionization** — End-to-end API, containerization, and production deployment.

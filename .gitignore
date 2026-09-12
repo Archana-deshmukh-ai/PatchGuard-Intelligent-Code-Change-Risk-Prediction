@@ -25,5 +25,7 @@ Thumbs.db
 .env
 .env.local
 
-# Temporary test repositories
+# Temporary test repositories & external benchmark repos
 scratch/test_repo/
+scratch/test_szz_repo/
+scratch/external_repo/
