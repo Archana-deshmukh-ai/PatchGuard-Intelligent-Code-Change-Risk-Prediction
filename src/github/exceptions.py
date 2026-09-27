@@ -39,3 +39,33 @@ class GitHubPRNotFoundError(GitHubAPIError):
 class GitHubPRValidationError(GitHubIntegrationError):
     """Raised when GitHub PR response metadata or repository identifiers fail structural validation."""
     pass
+
+class RepositoryAcquisitionError(GitHubIntegrationError):
+    """Base exception for repository acquisition and workspace management errors."""
+    def __init__(self, message: str):
+        clean_msg = message.split("Authorization")[0].strip() if "Authorization" in message else message
+        super().__init__(clean_msg)
+
+class RepositoryCloneError(RepositoryAcquisitionError):
+    """Raised when cloning a remote Git repository fails."""
+    pass
+
+class RepositoryFetchError(RepositoryAcquisitionError):
+    """Raised when fetching commits from a remote Git repository fails."""
+    pass
+
+class RepositoryValidationError(RepositoryAcquisitionError):
+    """Raised when a local or acquired Git repository fails validation."""
+    pass
+
+class CommitNotAvailableError(RepositoryAcquisitionError):
+    """Raised when requested base or head commit SHAs are missing from the local repository."""
+    pass
+
+class RepositoryIdentityMismatchError(RepositoryAcquisitionError):
+    """Raised when a local repository does not match the requested owner/repository identity."""
+    pass
+
+class RepositoryCleanupError(RepositoryAcquisitionError):
+    """Raised when temporary repository workspace cleanup fails."""
+    pass

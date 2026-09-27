@@ -6,17 +6,17 @@
 The long-term goal of PatchGuard is to build a real-world software engineering bug-risk prediction system. The final architecture will analyze code changes (Git commits / Pull Requests), predict bug probability using Machine Learning, provide LLM-driven risk explanations, leverage RAG over repository documentation/issues/PR history, and integrate into developer CI/CD workflows to give actionable recommendations.
 
 ## Current Stage
-**Phase 7.2.1 Complete — GitHub Read-Only PR Retrieval + Adapter Completed, Tested, and Checkpointed**
+**Phase 7.2.2 Complete — Authenticated GitHub Repository Acquisition Completed, Tested, and Checkpointed**
 
 ### Handoff Guide for Future AI / Developer Sessions
 > [!IMPORTANT]
-> **Phase 7.2.1 is COMPLETE and CHECKPOINTED**.
+> **Phase 7.2.2 is COMPLETE and CHECKPOINTED**.
 >
 > When resuming development in a future session:
 > 1. First inspect [`README.md`](file:///c:/Projects/CODE_project/bug-prediction/README.md), [`PROJECT_LOG.md`](file:///c:/Projects/CODE_project/bug-prediction/PROJECT_LOG.md), `git status`, and `git log`.
-> 2. Understand that Phase 7.2.1 (GitHub Read-Only PR Retrieval + Adapter: `GitHubAppAuthenticator`, `GitHubClient`, `GitHubPullRequest`, `GitHubPRAdapter`, `github-pr-analyze` CLI subcommand, and 121 passing unit tests) is complete and tested.
-> 3. Understand that Phase 7.2.1 retrieves GitHub PR metadata and converts it into `PRAnalysisInput`. It does NOT clone repositories or run local Git diffs on remote PRs automatically.
-> 4. The next milestone is **Phase 7.2.2 — Authenticated Repository Acquisition for GitHub PR Analysis**.
+> 2. Understand that Phase 7.2.2 (Authenticated GitHub Repository Acquisition: `RepositoryAcquisitionManager`, temporary workspace lifecycle, `-c include.path` secure token transport, SHA & origin URL validation, updated `github-pr-analyze` CLI subcommand, and 144 passing unit tests) is complete and tested.
+> 3. Understand that Phase 7.2.2 connects GitHub PR metadata retrieval with authenticated temporary repository acquisition, allowing `github-pr-analyze` to acquire remote GitHub PRs (or validate local overrides) and pass the validated repository directly into `PRAnalyzer` for ML risk prediction and qualitative LLM code analysis.
+> 4. The next milestone is **Phase 7.3 — Automated GitHub PR Workflow + Reporting**.
 >
 > **Long-Term Roadmap**:
 > 1. Project & ML Foundation — **COMPLETE**
@@ -27,11 +27,36 @@ The long-term goal of PatchGuard is to build a real-world software engineering b
 > 6. LLM Code-Change Analysis & CLI — **COMPLETE**
 > 7. Local PR Analysis Core (Phase 7.1) — **COMPLETE**
 > 8. **GitHub Read-Only PR Retrieval + Adapter (Phase 7.2.1) — COMPLETE**
-> 9. **GitHub Repository Acquisition (Phase 7.2.2) — NEXT**
-> 10. Developer Dashboard
-> 11. Productionization
+> 9. **Authenticated GitHub Repository Acquisition (Phase 7.2.2) — COMPLETE**
+> 10. **Automated GitHub PR Workflow + Reporting (Phase 7.3) — NEXT**
+> 11. Developer Dashboard
+> 12. Productionization
 
 ---
+
+## Phase 7.2.2 Authenticated GitHub Repository Acquisition Implementation & Verification
+
+Completed Phase 7.2.2 (Authenticated GitHub Repository Acquisition), enabling PatchGuard to acquire remote GitHub PR repositories using GitHub App installation tokens into isolated temporary workspaces and execute end-to-end PR risk prediction and qualitative diff analysis via `PRAnalyzer`.
+
+### 1. COMPLETED
+- Implemented `RepositoryAcquisitionManager` in `src/github/acquisition.py` providing `acquire()` context manager for temporary workspace lifecycle (`mkdtemp`, git initialization, remote configuration, fetching, SHA validation, and guaranteed cleanup).
+- Added repository acquisition domain exceptions in `src/github/exceptions.py` (`RepositoryAcquisitionError`, `RepositoryCloneError`, `RepositoryFetchError`, `RepositoryValidationError`, `CommitNotAvailableError`, `RepositoryIdentityMismatchError`, `RepositoryCleanupError`).
+- Implemented secure token handling using Git `-c include.path=<git_config_file>` configuration files created transiently inside temporary workspace directories, ensuring installation access tokens are never exposed in subprocess CLI arguments or logs.
+- Implemented 40-character hexadecimal SHA validation (`cat-file -e`) and repository origin URL identity matching (`remote.origin.url`).
+- Enforced untrusted input security boundary: PatchGuard treats target repository contents as data only and **never executes repository code**, setup scripts, test runners, or build systems.
+- Updated `github-pr-analyze` CLI subcommand in `src/cli.py` to connect `GitHubClient` -> `GitHubPRAdapter` -> `RepositoryAcquisitionManager` -> `PRAnalyzer` -> `PRAnalysisResult`.
+- Added 23 comprehensive offline unit tests in `tests/test_repository_acquisition.py` and updated `tests/test_github_integration.py` to bring full test suite to **144 passing unit tests** (100% offline).
+
+### 2. CURRENT STATE
+- Phase 7.2.2 Authenticated GitHub Repository Acquisition is COMPLETE and tested.
+- CLI subcommand `patchguard github-pr-analyze` executes full end-to-end PR analysis on acquired remote repositories or local overrides.
+- GitHub webhooks, PR comments, Checks, automatic labels, and background workers are NOT implemented.
+
+### 3. DESIGN DECISIONS
+- **Strict Decoupled Architecture**: `PRAnalyzer`, Phase 5 ML models, and Phase 6 LLMs remain 100% decoupled from GitHub API or network concepts. `RepositoryAcquisitionManager` produces standard local Git directories consumed by `PRAnalysisInput`.
+- **Workspace Lifecycle**: Temporary repositories are created using standard library `tempfile.mkdtemp` and cleaned up reliably via `try...finally` context management (`shutil.rmtree`).
+- **Token Safety**: Tokens are passed to Git via `include.path` temporary config files or environment variables; never passed directly in process command-line argument lists.
+- **Untrusted Code Security**: Repository acquisition executes Git commands only (`init`, `remote add`, `fetch`, `cat-file`, `config`). No build scripts or repo executables are ever run.
 
 ## Phase 7.2.1 GitHub Read-Only PR Retrieval & Adapter Implementation & Verification
 

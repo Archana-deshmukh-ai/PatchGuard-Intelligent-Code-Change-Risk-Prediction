@@ -9,12 +9,20 @@ from .exceptions import (
     GitHubAuthError,
     GitHubAPIError,
     GitHubPRNotFoundError,
-    GitHubPRValidationError
+    GitHubPRValidationError,
+    RepositoryAcquisitionError,
+    RepositoryCloneError,
+    RepositoryFetchError,
+    RepositoryValidationError,
+    CommitNotAvailableError,
+    RepositoryIdentityMismatchError,
+    RepositoryCleanupError
 )
 from .schema import GitHubPullRequest
 from .auth import GitHubAppConfig, GitHubAppAuthenticator
 from .client import GitHubClient
 from .adapter import GitHubPRAdapter
+from .acquisition import RepositoryAcquisitionManager
 
 __all__ = [
     "GitHubIntegrationError",
@@ -23,9 +31,17 @@ __all__ = [
     "GitHubAPIError",
     "GitHubPRNotFoundError",
     "GitHubPRValidationError",
+    "RepositoryAcquisitionError",
+    "RepositoryCloneError",
+    "RepositoryFetchError",
+    "RepositoryValidationError",
+    "CommitNotAvailableError",
+    "RepositoryIdentityMismatchError",
+    "RepositoryCleanupError",
     "GitHubPullRequest",
     "GitHubAppConfig",
     "GitHubAppAuthenticator",
     "GitHubClient",
-    "GitHubPRAdapter"
+    "GitHubPRAdapter",
+    "RepositoryAcquisitionManager"
 ]

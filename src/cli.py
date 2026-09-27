@@ -32,7 +32,8 @@ from src.github import (
     GitHubPRAdapter,
     GitHubPullRequest,
     GitHubIntegrationError,
-    GitHubPRValidationError
+    GitHubPRValidationError,
+    RepositoryAcquisitionManager
 )
 
 def render_text_card(res: PredictionResult) -> str:
@@ -244,11 +245,11 @@ def render_pr_analysis_text_card(res: PRAnalysisResult) -> str:
     return "\n".join(lines)
 
 
-def render_github_pr_text_card(gh_pr: GitHubPullRequest, analysis_input: PRAnalysisInput) -> str:
-    """Renders human-readable text report card for GitHub PR retrieval and adaptation."""
+def render_github_pr_analysis_text_card(gh_pr: GitHubPullRequest, res: PRAnalysisResult) -> str:
+    """Renders human-readable text report card for GitHub Pull Request risk analysis."""
     lines = []
     lines.append("==========================================================================")
-    lines.append("                 PATCHGUARD GITHUB PULL REQUEST RETRIEVAL                 ")
+    lines.append("              PATCHGUARD GITHUB PULL REQUEST RISK ANALYSIS                ")
     lines.append("==========================================================================")
     lines.append(f"  Target Repository      : {gh_pr.owner}/{gh_pr.repository}")
     lines.append(f"  Pull Request Number    : #{gh_pr.number}")
@@ -257,19 +258,81 @@ def render_github_pr_text_card(gh_pr: GitHubPullRequest, analysis_input: PRAnaly
     lines.append(f"  HTML URL               : {gh_pr.html_url or 'N/A'}")
     lines.append("--------------------------------------------------------------------------")
     lines.append("--- RETRIEVED GITHUB COMMIT REFERENCES ---")
-    lines.append(f"  Base Branch / Ref      : {gh_pr.base_ref}")
-    lines.append(f"  Base Resolved SHA      : {gh_pr.base_sha}")
-    lines.append(f"  Head Branch / Ref      : {gh_pr.head_ref}")
-    lines.append(f"  Head Resolved SHA      : {gh_pr.head_sha}")
+    lines.append(f"  Base Branch / Ref      : {gh_pr.base_ref} ({gh_pr.base_sha[:12]})")
+    lines.append(f"  Head Branch / Ref      : {gh_pr.head_ref} ({gh_pr.head_sha[:12]})")
     lines.append("--------------------------------------------------------------------------")
-    lines.append("--- ADAPTED PR ANALYSIS INPUT (Phase 7.1 Interface) ---")
-    lines.append(f"  Target Local Path      : {analysis_input.repo_path}")
-    lines.append(f"  Analysis BASE SHA      : {analysis_input.base_ref}")
-    lines.append(f"  Analysis HEAD SHA      : {analysis_input.head_ref}")
+    lines.append("--- PER-COMMIT HISTORICAL ML DEFECT RISK PREDICTIONS ---")
+    if res.commits:
+        for c in res.commits:
+            msg_first_line = c.commit_message.splitlines()[0] if c.commit_message else ''
+            lines.append(f"  Commit {c.commit_hash} ({c.full_hash[:12]}): {msg_first_line}")
+            if c.prediction:
+                p = c.prediction
+                lines.append(f"    - Estimated Risk Score : {p.raw_probability:.4f} (Threshold: {p.decision_threshold:.2f})")
+                lines.append(f"    - Above Threshold      : {p.is_above_threshold} | Risk Level: {p.risk_level}")
+            else:
+                lines.append(f"    - ML Prediction Skipped: {c.error or 'N/A'}")
+            lines.append("")
+    else:
+        lines.append("  No commits introduced in this pull request comparison.")
+    lines.append("--------------------------------------------------------------------------")
+    lines.append("--- CUMULATIVE PULL REQUEST CODE CHANGE ANALYSIS (Phase 6 LLM) ---")
+    if res.is_empty or res.cumulative_analysis is None:
+        lines.append("  No code changes detected between base and head references.")
+    else:
+        analysis = res.cumulative_analysis
+        lines.append(f"  Model Provider         : {analysis.model_provider} ({analysis.model_name})")
+        lines.append("")
+        lines.append("  Summary:")
+        lines.append(f"    {analysis.summary}")
+        lines.append("")
+        lines.append("  Key Changes:")
+        if analysis.key_changes:
+            for item in analysis.key_changes:
+                lines.append(f"    - {item}")
+        else:
+            lines.append("    - None reported.")
+        lines.append("")
+        lines.append("  Potential Risk Factors:")
+        if analysis.potential_risk_factors:
+            for rf in analysis.potential_risk_factors:
+                line_str = f" (Line Range: {rf.line_range})" if rf.line_range else ""
+                verified_str = "Verified" if rf.evidence_verified else "Unverified/Ungrounded"
+                lines.append(f"    - [{rf.review_priority}] {rf.category}: {rf.description}")
+                lines.append(f"      File    : {rf.file_path}{line_str}")
+                if rf.evidence_snippet:
+                    lines.append(f"      Evidence: \"{rf.evidence_snippet}\" [{verified_str}]")
+                else:
+                    lines.append(f"      Evidence: [No snippet provided] [{verified_str}]")
+        else:
+            lines.append("    - None reported.")
+        lines.append("")
+        lines.append("  Affected Areas:")
+        if analysis.affected_areas:
+            for area in analysis.affected_areas:
+                lines.append(f"    - {area}")
+        else:
+            lines.append("    - None reported.")
+        lines.append("")
+        lines.append("  Testing Observations:")
+        if analysis.testing_observations:
+            for obs in analysis.testing_observations:
+                lines.append(f"    - {obs}")
+        else:
+            lines.append("    - None reported.")
+        lines.append("")
+        lines.append("  Recommended Review Actions:")
+        if analysis.recommended_review_actions:
+            for ra in analysis.recommended_review_actions:
+                target_str = f" (Target File: {ra.target_file})" if ra.target_file else ""
+                lines.append(f"    - {ra.action}{target_str}")
+        else:
+            lines.append("    - None reported.")
+        lines.append("")
+        lines.append("  Confidence & Audit Notes:")
+        lines.append(f"    {analysis.confidence_notes or 'None.'}")
     lines.append("==========================================================================")
-    lines.append("NOTE: GitHub PR metadata retrieved and converted to PRAnalysisInput successfully.")
-    lines.append("Full Git-backed commit risk prediction and diff analysis requires local repository")
-    lines.append("acquisition (Phase 7.2.2).")
+    lines.append(f"DISCLAIMER: {res.analysis_disclaimer}")
     lines.append("==========================================================================\n")
     return "\n".join(lines)
 
@@ -312,11 +375,15 @@ def main(args_list: Optional[List[str]] = None) -> int:
     pr_parser.add_argument("--models-dir", default=None, help="Directory containing ML model artifacts")
 
     # Subcommand: github-pr-analyze
-    gh_parser = subparsers.add_parser("github-pr-analyze", help="Retrieve GitHub Pull Request metadata and adapt to PRAnalysisInput")
+    gh_parser = subparsers.add_parser("github-pr-analyze", help="Retrieve GitHub PR, acquire repository workspace, and run PR risk analysis")
     gh_parser.add_argument("--repo", "-r", required=True, help="GitHub repository in 'owner/repository' format (e.g. bottlepy/bottle)")
     gh_parser.add_argument("--pr", "-p", type=int, required=True, help="Pull Request number (e.g. 42)")
-    gh_parser.add_argument("--local-repo", default=".", help="Local repository path for adapted PRAnalysisInput (default: .)")
+    gh_parser.add_argument("--local-repo", default=None, help="Optional existing local repository path override")
+    gh_parser.add_argument("--provider", choices=["mock", "openai"], default="mock", help="LLM provider to use (default: mock)")
+    gh_parser.add_argument("--model", "-m", default=None, help="Optional model name override for provider")
+    gh_parser.add_argument("--threshold", "-t", type=float, default=None, help="ML decision threshold override (default: 0.35)")
     gh_parser.add_argument("--format", "-f", choices=["text", "json"], default="text", help="Output format (default: text)")
+    gh_parser.add_argument("--models-dir", default=None, help="Directory containing ML model artifacts")
     
     parsed = parser.parse_args(args_list)
     
@@ -462,33 +529,56 @@ def main(args_list: Optional[List[str]] = None) -> int:
             # 3. Fetch GitHub Pull Request metadata
             gh_pr = client.get_pull_request(owner=owner, repo=repo, pull_number=parsed.pr)
 
-            # 4. Convert to PRAnalysisInput via GitHubPRAdapter
-            analysis_input = GitHubPRAdapter.to_analysis_input(gh_pr, repo_path=parsed.local_repo)
+            # 4. Acquire access token for Git transport
+            token = client._get_token()
 
-            # 5. Render Output
-            if parsed.format == "json":
-                out_dict = {
-                    "repository": f"{gh_pr.owner}/{gh_pr.repository}",
-                    "pull_request": gh_pr.number,
-                    "title": gh_pr.title,
-                    "html_url": gh_pr.html_url,
-                    "state": gh_pr.state,
-                    "base_ref": gh_pr.base_ref,
-                    "base_sha": gh_pr.base_sha,
-                    "head_ref": gh_pr.head_ref,
-                    "head_sha": gh_pr.head_sha,
-                    "analysis_input": {
-                        "repo_path": analysis_input.repo_path,
-                        "base_ref": analysis_input.base_ref,
-                        "head_ref": analysis_input.head_ref
-                    },
-                    "note": "GitHub PR metadata retrieved and converted to PRAnalysisInput. Actual Git-backed commit risk prediction and diff analysis requires local repository acquisition (Phase 7.2.2)."
-                }
-                print(json.dumps(out_dict, indent=2))
-            else:
-                print(render_github_pr_text_card(gh_pr, analysis_input))
+            # 5. Acquire repository workspace and execute PR analysis
+            acq_mgr = RepositoryAcquisitionManager()
+            with acq_mgr.acquire(
+                owner=gh_pr.owner,
+                repo=gh_pr.repository,
+                base_sha=gh_pr.base_sha,
+                head_sha=gh_pr.head_sha,
+                token=token,
+                local_repo_override=parsed.local_repo
+            ) as acquired_repo_path:
+                # 6. Adapt to PRAnalysisInput
+                pr_input = PRAnalysisInput(
+                    repo_path=acquired_repo_path,
+                    base_ref=gh_pr.base_sha,
+                    head_ref=gh_pr.head_sha
+                )
 
-            return 0
+                # 7. Instantiate RiskPredictionEngine and LLM Provider
+                engine = RiskPredictionEngine(models_dir=parsed.models_dir)
+                if parsed.provider == "mock":
+                    provider: LLMProvider = MockLLMProvider()
+                elif parsed.provider == "openai":
+                    provider_kwargs = {}
+                    if parsed.model:
+                        provider_kwargs["model"] = parsed.model
+                    provider = OpenAIProvider(**provider_kwargs)
+                else:
+                    sys.stderr.write(f"[PatchGuard Error] Unsupported provider: {parsed.provider}\n")
+                    return 1
+
+                llm_analyzer = LLMCodeAnalyzer(provider=provider)
+                pr_analyzer = PRAnalyzer(predictor=engine, llm_analyzer=llm_analyzer)
+
+                # 8. Run PR analysis
+                result = pr_analyzer.analyze(pr_input, threshold=parsed.threshold)
+
+                # 9. Render Output
+                if parsed.format == "json":
+                    out_dict = {
+                        "github_pr": gh_pr.to_dict(),
+                        "pr_analysis": result.to_dict()
+                    }
+                    print(json.dumps(out_dict, indent=2))
+                else:
+                    print(render_github_pr_analysis_text_card(gh_pr, result))
+
+                return 0
 
         except PatchGuardError as pge:
             sys.stderr.write(f"[PatchGuard Error] {pge.__class__.__name__}: {pge}\n")

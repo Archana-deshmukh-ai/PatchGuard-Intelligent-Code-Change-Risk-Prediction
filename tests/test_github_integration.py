@@ -6,6 +6,8 @@ Operates 100% offline using mocked HTTP handlers and fake credentials. Zero netw
 import os
 import sys
 import json
+import shutil
+import tempfile
 import unittest
 from unittest.mock import patch, MagicMock
 
@@ -44,26 +46,26 @@ class TestGitHubAppConfigAndAuth(unittest.TestCase):
         self.assertEqual(cfg.installation_id, "67890")
         self.assertEqual(cfg.private_key, FAKE_RSA_PRIVATE_KEY)
 
-    @patch.dict(os.environ, {}, clear=True)
     def test_2_missing_app_id(self):
         """2. Missing app ID raises GitHubConfigError."""
-        with self.assertRaises(GitHubConfigError) as ctx:
-            GitHubAppConfig.from_env()
-        self.assertIn("GITHUB_APP_ID", str(ctx.exception))
+        with patch.dict(os.environ, {"GITHUB_APP_ID": "", "GITHUB_APP_PRIVATE_KEY": "", "GITHUB_APP_PRIVATE_KEY_PATH": "", "GITHUB_INSTALLATION_ID": ""}):
+            with self.assertRaises(GitHubConfigError) as ctx:
+                GitHubAppConfig.from_env()
+            self.assertIn("GITHUB_APP_ID", str(ctx.exception))
 
-    @patch.dict(os.environ, {"GITHUB_APP_ID": "12345"}, clear=True)
     def test_3_missing_private_key(self):
         """3. Missing private key raises GitHubConfigError."""
-        with self.assertRaises(GitHubConfigError) as ctx:
-            GitHubAppConfig.from_env()
-        self.assertIn("GITHUB_APP_PRIVATE_KEY", str(ctx.exception))
+        with patch.dict(os.environ, {"GITHUB_APP_ID": "12345", "GITHUB_APP_PRIVATE_KEY": "", "GITHUB_APP_PRIVATE_KEY_PATH": "", "GITHUB_INSTALLATION_ID": ""}):
+            with self.assertRaises(GitHubConfigError) as ctx:
+                GitHubAppConfig.from_env()
+            self.assertIn("GITHUB_APP_PRIVATE_KEY", str(ctx.exception))
 
-    @patch.dict(os.environ, {"GITHUB_APP_ID": "12345", "GITHUB_APP_PRIVATE_KEY": FAKE_RSA_PRIVATE_KEY}, clear=True)
     def test_4_missing_installation_id(self):
         """4. Missing installation ID raises GitHubConfigError."""
-        with self.assertRaises(GitHubConfigError) as ctx:
-            GitHubAppConfig.from_env()
-        self.assertIn("GITHUB_INSTALLATION_ID", str(ctx.exception))
+        with patch.dict(os.environ, {"GITHUB_APP_ID": "12345", "GITHUB_APP_PRIVATE_KEY": FAKE_RSA_PRIVATE_KEY, "GITHUB_APP_PRIVATE_KEY_PATH": "", "GITHUB_INSTALLATION_ID": ""}):
+            with self.assertRaises(GitHubConfigError) as ctx:
+                GitHubAppConfig.from_env()
+            self.assertIn("GITHUB_INSTALLATION_ID", str(ctx.exception))
 
     def test_5_authentication_failure(self):
         """5. Simulated authentication exchange failure raises GitHubAuthError."""
@@ -263,9 +265,10 @@ class TestGitHubCLIIntegration(unittest.TestCase):
         "GITHUB_APP_ID": "12345",
         "GITHUB_APP_PRIVATE_KEY": FAKE_RSA_PRIVATE_KEY,
         "GITHUB_INSTALLATION_ID": "67890"
-    }, clear=True)
+    })
+    @patch("src.cli.RepositoryAcquisitionManager")
     @patch("src.cli.GitHubClient")
-    def test_19_cli_successful_github_pr_retrieval(self, mock_client_cls):
+    def test_19_cli_successful_github_pr_retrieval(self, mock_client_cls, mock_acq_cls):
         """19. Successful CLI invocation of github-pr-analyze subcommand."""
         mock_instance = MagicMock()
         mock_instance.get_pull_request.return_value = GitHubPullRequest(
@@ -276,17 +279,29 @@ class TestGitHubCLIIntegration(unittest.TestCase):
         )
         mock_client_cls.return_value = mock_instance
 
-        args = ["github-pr-analyze", "--repo", "bottlepy/bottle", "--pr", "42", "--format", "text"]
-        exit_code = cli_main(args)
-        self.assertEqual(exit_code, 0)
+        # Create temporary test git repo
+        temp_dir = tempfile.mkdtemp()
+        try:
+            mock_acq = MagicMock()
+            mock_acq.acquire.return_value.__enter__.return_value = temp_dir
+            mock_acq_cls.return_value = mock_acq
+
+            args = ["github-pr-analyze", "--repo", "bottlepy/bottle", "--pr", "42", "--format", "text"]
+            with patch("src.cli.PRAnalyzer.analyze") as mock_pr_analyze:
+                mock_pr_analyze.return_value = MagicMock(commits=[], is_empty=True, cumulative_analysis=None, analysis_disclaimer="Disclaimer")
+                exit_code = cli_main(args)
+                self.assertEqual(exit_code, 0)
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
 
     @patch.dict(os.environ, {
         "GITHUB_APP_ID": "12345",
         "GITHUB_APP_PRIVATE_KEY": FAKE_RSA_PRIVATE_KEY,
         "GITHUB_INSTALLATION_ID": "67890"
-    }, clear=True)
+    })
+    @patch("src.cli.RepositoryAcquisitionManager")
     @patch("src.cli.GitHubClient")
-    def test_20_cli_json_output(self, mock_client_cls):
+    def test_20_cli_json_output(self, mock_client_cls, mock_acq_cls):
         """20. github-pr-analyze --format json outputs valid JSON containing analysis_input."""
         mock_instance = MagicMock()
         mock_instance.get_pull_request.return_value = GitHubPullRequest(
@@ -297,22 +312,32 @@ class TestGitHubCLIIntegration(unittest.TestCase):
         )
         mock_client_cls.return_value = mock_instance
 
-        args = ["github-pr-analyze", "--repo", "bottlepy/bottle", "--pr", "42", "--format", "json"]
-        exit_code = cli_main(args)
-        self.assertEqual(exit_code, 0)
+        temp_dir = tempfile.mkdtemp()
+        try:
+            mock_acq = MagicMock()
+            mock_acq.acquire.return_value.__enter__.return_value = temp_dir
+            mock_acq_cls.return_value = mock_acq
 
-    @patch.dict(os.environ, {}, clear=True)
+            args = ["github-pr-analyze", "--repo", "bottlepy/bottle", "--pr", "42", "--format", "json"]
+            with patch("src.cli.PRAnalyzer.analyze") as mock_pr_analyze:
+                mock_pr_analyze.return_value = MagicMock(to_dict=lambda: {"commits": []})
+                exit_code = cli_main(args)
+                self.assertEqual(exit_code, 0)
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
     def test_21_cli_configuration_failure(self):
         """21. Missing environment variables produces clean CLI error exit code 1."""
-        args = ["github-pr-analyze", "--repo", "bottlepy/bottle", "--pr", "42"]
-        exit_code = cli_main(args)
-        self.assertEqual(exit_code, 1)
+        with patch.dict(os.environ, {"GITHUB_APP_ID": "", "GITHUB_APP_PRIVATE_KEY": "", "GITHUB_APP_PRIVATE_KEY_PATH": "", "GITHUB_INSTALLATION_ID": ""}):
+            args = ["github-pr-analyze", "--repo", "bottlepy/bottle", "--pr", "42"]
+            exit_code = cli_main(args)
+            self.assertEqual(exit_code, 1)
 
     @patch.dict(os.environ, {
         "GITHUB_APP_ID": "12345",
         "GITHUB_APP_PRIVATE_KEY": FAKE_RSA_PRIVATE_KEY,
         "GITHUB_INSTALLATION_ID": "67890"
-    }, clear=True)
+    })
     @patch("src.cli.GitHubClient")
     def test_22_cli_api_failure(self, mock_client_cls):
         """22. GitHub API failure produces clean CLI error exit code 1."""
