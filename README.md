@@ -230,6 +230,9 @@ python src/cli.py github-pr-analyze --repo owner/repository --pr 42 --local-repo
 3. **Refactoring Noise**: Large structural refactorings exhibit high churn and multi-file touches, increasing predicted risk scores even when no defects are introduced (leading to False Positives).
 4. **Temporal Class Prevalence Shift**: Defect-introducing commit frequency decreases as codebases mature (from 45% in early history to 20% in recent commits), affecting fixed-threshold precision across multi-year timeframes.
 5. **Uncalibrated Probability Scores**: Model probabilities represent discrimination scores and have not yet been formally calibrated into real-world probabilities.
+6. **Synchronous Webhook Processing**: Webhook event processing operates synchronously within the request handler; background job queues (Redis/Celery) are intentionally out of scope for Phase 7.3.
+7. **External Fork PR Acquisition**: Pull requests originating from external repository forks where head commit SHAs are not present in the base repository require fetching from fork remotes; cross-repository fork PR acquisition is currently unsupported in Phase 7.3.
+
 
 ---
 

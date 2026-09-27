@@ -53,6 +53,7 @@ Completed Phase 7.3 (Automated GitHub PR Workflow + Reporting), providing end-to
 - **Idempotency & Update Behavior**: Uses `<!-- patchguard-report -->` HTML comment tag at the top of report bodies to detect previous PatchGuard reports and edit existing comments instead of spamming duplicate comments on `synchronize` events.
 - **Credential Hygiene**: Access tokens, private keys, JWTs, and Authorization headers are never included in GitHub PR comments, logs, or exception strings.
 - **Untrusted Code Boundary**: No repository code, setup scripts, or test runners are executed during repository acquisition or workflow execution.
+- **Documented Limitations**: Explicitly documented synchronous processing limitation and cross-repository external fork PR acquisition limitation in README.md Section 9.
 
 ---
 
