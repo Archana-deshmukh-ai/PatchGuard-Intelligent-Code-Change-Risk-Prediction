@@ -1,5 +1,5 @@
 """
-Custom exception hierarchy for PatchGuard Phase 7.2 GitHub integration.
+Custom exception hierarchy for PatchGuard Phase 7.2 & 7.3 GitHub integration.
 Strictly ensures credentials, tokens, and authorization headers are never exposed in exception messages.
 """
 
@@ -20,7 +20,6 @@ class GitHubAuthError(GitHubIntegrationError):
 class GitHubAPIError(GitHubIntegrationError):
     """Raised when a GitHub API request fails or returns an unexpected status code."""
     def __init__(self, message: str, status_code: int = 0):
-        # Sanitize message to ensure authorization headers/tokens are never exposed
         clean_msg = message.split("Authorization")[0].strip() if "Authorization" in message else message
         super().__init__(clean_msg)
         self.status_code = status_code
@@ -69,3 +68,27 @@ class RepositoryIdentityMismatchError(RepositoryAcquisitionError):
 class RepositoryCleanupError(RepositoryAcquisitionError):
     """Raised when temporary repository workspace cleanup fails."""
     pass
+
+class WebhookAuthenticationError(GitHubIntegrationError):
+    """Raised when GitHub webhook HMAC signature verification fails or signature header is missing."""
+    pass
+
+class WebhookValidationError(GitHubIntegrationError):
+    """Raised when GitHub webhook request payload is missing required attributes or malformed."""
+    pass
+
+class UnsupportedGitHubEvent(GitHubIntegrationError):
+    """Raised when GitHub webhook event type or pull_request action is not supported for analysis."""
+    pass
+
+class PRAnalysisWorkflowError(GitHubIntegrationError):
+    """Raised when automated PR analysis workflow orchestration encounters an execution error."""
+    def __init__(self, message: str):
+        clean_msg = message.split("Authorization")[0].strip() if "Authorization" in message else message
+        super().__init__(clean_msg)
+
+class GitHubReportingError(GitHubIntegrationError):
+    """Raised when posting or updating a GitHub PR analysis comment fails."""
+    def __init__(self, message: str):
+        clean_msg = message.split("Authorization")[0].strip() if "Authorization" in message else message
+        super().__init__(clean_msg)

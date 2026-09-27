@@ -12,19 +12,21 @@ The long-term goal of PatchGuard is to serve as an intelligent assistant in deve
 ---
 
 ## 2. Current Project Status
-**Phase 7.2.2 Complete — Authenticated GitHub Repository Acquisition**
+**Phase 7.3 Complete — Automated GitHub PR Workflow + Reporting**
 
-PatchGuard features a unified Command Line Interface (`src/cli.py`) orchestrating quantitative ML risk prediction (`patchguard predict`), single-commit qualitative LLM code-change analysis (`patchguard analyze`), local Pull Request analysis (`patchguard pr-analyze`), and end-to-end GitHub Pull Request acquisition and analysis (`patchguard github-pr-analyze`).
+PatchGuard features an automated GitHub Pull Request workflow orchestrator (`src/github/workflow.py`), HMAC-SHA256 webhook event validator (`src/github/webhook.py`), and idempotent PR comment reporter (`src/github/reporter.py`), alongside the unified CLI (`src/cli.py`).
 
-- **Unified CLI Subcommands**:
-  - `patchguard predict`: Invokes Phase 5 `RiskPredictionEngine` to evaluate 10 commit-level features and report calibrated defect risk against threshold 0.35.
-  - `patchguard analyze`: Orchestrates Git diff extraction, prompt construction, LLM inference (via `mock` or `openai`), response parsing, and evidence validation into a combined analysis report.
-  - `patchguard pr-analyze`: Orchestrates local Pull Request analysis by evaluating per-commit ML predictions for each commit in the PR and cumulative BASE->HEAD LLM qualitative code change analysis.
-  - `patchguard github-pr-analyze`: Retrieves GitHub Pull Request metadata (`GitHubClient`), acquires temporary local repository workspace (`RepositoryAcquisitionManager`), validates `base_sha` and `head_sha` commit presence and origin URL identity, and executes full `PRAnalyzer` risk prediction and qualitative analysis.
-- **Security & Execution Boundary**: PatchGuard retrieves repository content strictly for Git diff extraction and ML/LLM analysis; it **does NOT execute repository code**, build scripts, test suites, or package setup files. Sensitive credentials (private keys, JWTs, installation tokens) are held in memory and never logged, printed, or passed in CLI subprocess arguments.
-- **Provider & Format Options**: Supports `--provider mock` (default, 100% offline) and `--provider openai` (live API execution requiring `OPENAI_API_KEY`), with human-readable `--format text` card rendering or structured `--format json` output.
-- **Error Handling**: Converts pipeline errors into clean stderr messages (`[PatchGuard Error]`) with deterministic non-zero exit codes.
-- **Offline Reliability**: Full automated test suite (144 passing unit tests) operates 100% offline via mocked provider clients and temporary test Git repositories without external network calls.
+- **Automated Webhook Workflow Architecture**:
+  - `GitHubPRWorkflow`: Receives incoming raw webhook payloads and HTTP headers, verifies HMAC-SHA256 signatures against `GITHUB_WEBHOOK_SECRET` before JSON parsing, filters for supported actions (`opened`, `synchronize`, `reopened`), retrieves PR metadata via `GitHubClient`, acquires authenticated temporary workspace via `RepositoryAcquisitionManager`, runs per-commit ML defect predictions and cumulative LLM diff analysis via `PRAnalyzer`, and publishes markdown risk reports to GitHub PRs via `GitHubPRReporter`.
+  - `GitHubPRReporter`: Formats markdown PR comments with stable idempotency tag `<!-- patchguard-report -->`. Searches existing PR issue comments (GET `/repos/{owner}/{repo}/issues/{number}/comments`) and updates existing comments (PATCH) instead of creating duplicate comments (POST) on `synchronize` events.
+- **Security & Secret Hygiene Boundary**:
+  - HMAC-SHA256 signature verification uses constant-time comparison (`hmac.compare_digest`) before JSON parsing.
+  - Zero repository code execution (no setup.py, npm, build, or test scripts executed).
+  - Credentials, JWTs, installation tokens, and authorization headers are sanitized and never exposed in logs, tracebacks, exception strings, or GitHub PR comments.
+  - Required GitHub App Permissions: Minimum read-only repository contents (`contents:read`), pull requests (`pull_requests:read`), and issue/PR comment write access (`issues:write`).
+- **Offline Test Verification**:
+  - Full automated test suite (160 passing unit tests) operates 100% offline using mock HTTP fetchers and temporary Git repositories without external network dependencies.
+
 
 ---
 
@@ -242,6 +244,6 @@ python src/cli.py github-pr-analyze --repo owner/repository --pr 42 --local-repo
 - [x] **Phase 7.1: Local PR Analysis Core** — `PRAnalyzer`, `PRAnalysisInput`, `PRAnalysisResult`, cumulative merge-base diff extraction, per-commit ML predictions, and `patchguard pr-analyze` CLI.
 - [x] **Phase 7.2.1: GitHub Read-Only PR Retrieval + Adapter** — Read-only `GitHubClient`, RS256 JWT / token authentication (`GitHubAppAuthenticator`), PR schema mapping (`GitHubPRAdapter`), and `github-pr-analyze` CLI subcommand.
 - [x] **Phase 7.2.2: Authenticated GitHub Repository Acquisition** — `RepositoryAcquisitionManager`, temporary workspace lifecycle, `-c include.path` secure token transport, SHA & origin URL validation, end-to-end `github-pr-analyze` CLI.
-- [ ] **Phase 7.3: Automated GitHub PR Workflow + Reporting** *(NEXT)* — Webhooks, automated PR risk comments, and GitHub Checks workflow status integration.
-- [ ] **Phase 8: Developer Dashboard** — Interactive UI for commit risk monitoring and audit reports.
+- [x] **Phase 7.3: Automated GitHub PR Workflow + Reporting** — Webhook HMAC-SHA256 signature verification, event filtering (`opened`, `synchronize`, `reopened`), `GitHubPRWorkflow` orchestration, and idempotent markdown PR comment reporting (`GitHubPRReporter`).
+- [ ] **Phase 8: Developer Dashboard** *(NEXT)* — Interactive UI for commit risk monitoring and audit reports.
 - [ ] **Phase 9: Productionization** — End-to-end API, containerization, and production deployment.

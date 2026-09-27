@@ -1,6 +1,8 @@
 """
-PatchGuard GitHub Integration package (Phase 7.2.1).
-Provides read-only GitHub Pull Request retrieval, App authentication, metadata modeling, and adaptation.
+PatchGuard GitHub Integration package (Phase 7.3).
+Provides GitHub Pull Request retrieval, App authentication, metadata modeling, adaptation,
+authenticated repository acquisition, webhook parsing & signature verification, PR comment reporting,
+and automated PR workflow orchestration.
 """
 
 from .exceptions import (
@@ -16,13 +18,21 @@ from .exceptions import (
     RepositoryValidationError,
     CommitNotAvailableError,
     RepositoryIdentityMismatchError,
-    RepositoryCleanupError
+    RepositoryCleanupError,
+    WebhookAuthenticationError,
+    WebhookValidationError,
+    UnsupportedGitHubEvent,
+    PRAnalysisWorkflowError,
+    GitHubReportingError
 )
 from .schema import GitHubPullRequest
 from .auth import GitHubAppConfig, GitHubAppAuthenticator
 from .client import GitHubClient
 from .adapter import GitHubPRAdapter
 from .acquisition import RepositoryAcquisitionManager
+from .webhook import verify_webhook_signature, WebhookEventHandler, WebhookEventData
+from .reporter import GitHubPRReporter, IDEMPOTENCY_MARKER
+from .workflow import GitHubPRWorkflow
 
 __all__ = [
     "GitHubIntegrationError",
@@ -38,10 +48,21 @@ __all__ = [
     "CommitNotAvailableError",
     "RepositoryIdentityMismatchError",
     "RepositoryCleanupError",
+    "WebhookAuthenticationError",
+    "WebhookValidationError",
+    "UnsupportedGitHubEvent",
+    "PRAnalysisWorkflowError",
+    "GitHubReportingError",
     "GitHubPullRequest",
     "GitHubAppConfig",
     "GitHubAppAuthenticator",
     "GitHubClient",
     "GitHubPRAdapter",
-    "RepositoryAcquisitionManager"
+    "RepositoryAcquisitionManager",
+    "verify_webhook_signature",
+    "WebhookEventHandler",
+    "WebhookEventData",
+    "GitHubPRReporter",
+    "IDEMPOTENCY_MARKER",
+    "GitHubPRWorkflow"
 ]

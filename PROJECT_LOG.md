@@ -6,17 +6,18 @@
 The long-term goal of PatchGuard is to build a real-world software engineering bug-risk prediction system. The final architecture will analyze code changes (Git commits / Pull Requests), predict bug probability using Machine Learning, provide LLM-driven risk explanations, leverage RAG over repository documentation/issues/PR history, and integrate into developer CI/CD workflows to give actionable recommendations.
 
 ## Current Stage
-**Phase 7.2.2 Complete — Authenticated GitHub Repository Acquisition Completed, Tested, and Checkpointed**
+**Phase 7.3 Complete — Automated GitHub PR Workflow + Reporting Completed, Tested, and Checkpointed**
+
 
 ### Handoff Guide for Future AI / Developer Sessions
 > [!IMPORTANT]
-> **Phase 7.2.2 is COMPLETE and CHECKPOINTED**.
+> **Phase 7.3 is COMPLETE and CHECKPOINTED**.
 >
 > When resuming development in a future session:
 > 1. First inspect [`README.md`](file:///c:/Projects/CODE_project/bug-prediction/README.md), [`PROJECT_LOG.md`](file:///c:/Projects/CODE_project/bug-prediction/PROJECT_LOG.md), `git status`, and `git log`.
-> 2. Understand that Phase 7.2.2 (Authenticated GitHub Repository Acquisition: `RepositoryAcquisitionManager`, temporary workspace lifecycle, `-c include.path` secure token transport, SHA & origin URL validation, updated `github-pr-analyze` CLI subcommand, and 144 passing unit tests) is complete and tested.
-> 3. Understand that Phase 7.2.2 connects GitHub PR metadata retrieval with authenticated temporary repository acquisition, allowing `github-pr-analyze` to acquire remote GitHub PRs (or validate local overrides) and pass the validated repository directly into `PRAnalyzer` for ML risk prediction and qualitative LLM code analysis.
-> 4. The next milestone is **Phase 7.3 — Automated GitHub PR Workflow + Reporting**.
+> 2. Understand that Phase 7.3 (Automated GitHub PR Workflow + Reporting: `WebhookEventHandler`, HMAC-SHA256 signature verification, `GitHubPRWorkflow` orchestrator, `GitHubPRReporter` comment reporter with `<!-- patchguard-report -->` idempotency, and 160 passing offline unit tests) is complete and tested.
+> 3. Understand that Phase 7.3 receives incoming GitHub PR webhook events, verifies HMAC-SHA256 signatures before JSON parsing, filters for supported actions (`opened`, `synchronize`, `reopened`), retrieves PR metadata via `GitHubClient`, acquires an authenticated temporary workspace via `RepositoryAcquisitionManager`, runs per-commit ML risk predictions and cumulative LLM diff analysis via `PRAnalyzer`, and publishes or updates PR markdown comments via `GitHubPRReporter`.
+> 4. The next milestone is **Phase 8 — Developer Dashboard**.
 >
 > **Long-Term Roadmap**:
 > 1. Project & ML Foundation — **COMPLETE**
@@ -26,15 +27,37 @@ The long-term goal of PatchGuard is to build a real-world software engineering b
 > 5. Risk Prediction Engine — **COMPLETE**
 > 6. LLM Code-Change Analysis & CLI — **COMPLETE**
 > 7. Local PR Analysis Core (Phase 7.1) — **COMPLETE**
-> 8. **GitHub Read-Only PR Retrieval + Adapter (Phase 7.2.1) — COMPLETE**
-> 9. **Authenticated GitHub Repository Acquisition (Phase 7.2.2) — COMPLETE**
-> 10. **Automated GitHub PR Workflow + Reporting (Phase 7.3) — NEXT**
-> 11. Developer Dashboard
+> 8. GitHub Read-Only PR Retrieval + Adapter (Phase 7.2.1) — **COMPLETE**
+> 9. Authenticated GitHub Repository Acquisition (Phase 7.2.2) — **COMPLETE**
+> 10. **Automated GitHub PR Workflow + Reporting (Phase 7.3) — COMPLETE**
+> 11. **Developer Dashboard — NEXT**
 > 12. Productionization
+
+
+---
+
+## Phase 7.3 Automated GitHub PR Workflow + Reporting Implementation & Verification
+
+Completed Phase 7.3 (Automated GitHub PR Workflow + Reporting), providing end-to-end automated pull request risk analysis triggered by GitHub webhooks and reporting results directly to developers via GitHub PR comments.
+
+### 1. COMPLETED
+- Implemented `verify_webhook_signature` and `WebhookEventHandler` in `src/github/webhook.py` for HMAC-SHA256 signature verification over raw body bytes before JSON decoding, extracting `X-GitHub-Delivery` ID, and filtering supported actions (`opened`, `synchronize`, `reopened`) for open PRs.
+- Implemented `GitHubPRReporter` in `src/github/reporter.py` for formatting markdown risk reports containing `<!-- patchguard-report -->` idempotency tags, searching existing issue comments (`GET /repos/{owner}/{repo}/issues/{number}/comments`), and updating comments (`PATCH`) vs creating comments (`POST`).
+- Implemented `GitHubPRWorkflow` in `src/github/workflow.py` linking Webhook -> Client -> Acquisition -> PRAnalyzer -> PRReporter.
+- Added domain exceptions in `src/github/exceptions.py` (`WebhookAuthenticationError`, `WebhookValidationError`, `UnsupportedGitHubEvent`, `PRAnalysisWorkflowError`, `GitHubReportingError`).
+- Exported new primitives in `src/github/__init__.py`.
+- Added 16 comprehensive unit tests in `tests/test_github_workflow.py` bringing full offline test suite to **160 passing unit tests** (100% offline).
+
+### 2. DESIGN & SECURITY DECISIONS
+- **Signature Checked Before JSON Parsing**: HMAC-SHA256 signature verification occurs directly on raw HTTP request bytes before JSON decoding to prevent unauthenticated payload parsing attacks.
+- **Idempotency & Update Behavior**: Uses `<!-- patchguard-report -->` HTML comment tag at the top of report bodies to detect previous PatchGuard reports and edit existing comments instead of spamming duplicate comments on `synchronize` events.
+- **Credential Hygiene**: Access tokens, private keys, JWTs, and Authorization headers are never included in GitHub PR comments, logs, or exception strings.
+- **Untrusted Code Boundary**: No repository code, setup scripts, or test runners are executed during repository acquisition or workflow execution.
 
 ---
 
 ## Phase 7.2.2 Authenticated GitHub Repository Acquisition Implementation & Verification
+
 
 Completed Phase 7.2.2 (Authenticated GitHub Repository Acquisition), enabling PatchGuard to acquire remote GitHub PR repositories using GitHub App installation tokens into isolated temporary workspaces and execute end-to-end PR risk prediction and qualitative diff analysis via `PRAnalyzer`.
 
