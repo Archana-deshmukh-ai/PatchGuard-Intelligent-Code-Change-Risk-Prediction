@@ -6,17 +6,17 @@
 The long-term goal of PatchGuard is to build a real-world software engineering bug-risk prediction system. The final architecture will analyze code changes (Git commits / Pull Requests), predict bug probability using Machine Learning, provide LLM-driven risk explanations, leverage RAG over repository documentation/issues/PR history, and integrate into developer CI/CD workflows to give actionable recommendations.
 
 ## Current Stage
-**Phase 7.1 Complete — Local PR Analysis Core Completed, Tested, and Checkpointed**
+**Phase 7.2.1 Complete — GitHub Read-Only PR Retrieval + Adapter Completed, Tested, and Checkpointed**
 
 ### Handoff Guide for Future AI / Developer Sessions
 > [!IMPORTANT]
-> **Phase 7.1 is COMPLETE and CHECKPOINTED**.
+> **Phase 7.2.1 is COMPLETE and CHECKPOINTED**.
 >
 > When resuming development in a future session:
 > 1. First inspect [`README.md`](file:///c:/Projects/CODE_project/bug-prediction/README.md), [`PROJECT_LOG.md`](file:///c:/Projects/CODE_project/bug-prediction/PROJECT_LOG.md), `git status`, and `git log`.
-> 2. Understand that Phase 7.1 (Local PR Analysis Core: `PRAnalyzer`, `PRAnalysisInput`, `PRAnalysisResult`, cumulative merge-base diff extraction, per-commit ML predictions, `pr-analyze` CLI subcommand, and 98 passing unit tests) is complete and tested.
-> 3. GitHub API integration, webhooks, PR comments, PR checks, and authentication are NOT yet implemented.
-> 4. The next phase is **Phase 7.2 — GitHub API Adapter & PR Workflow Integration**.
+> 2. Understand that Phase 7.2.1 (GitHub Read-Only PR Retrieval + Adapter: `GitHubAppAuthenticator`, `GitHubClient`, `GitHubPullRequest`, `GitHubPRAdapter`, `github-pr-analyze` CLI subcommand, and 121 passing unit tests) is complete and tested.
+> 3. Understand that Phase 7.2.1 retrieves GitHub PR metadata and converts it into `PRAnalysisInput`. It does NOT clone repositories or run local Git diffs on remote PRs automatically.
+> 4. The next milestone is **Phase 7.2.2 — Authenticated Repository Acquisition for GitHub PR Analysis**.
 >
 > **Long-Term Roadmap**:
 > 1. Project & ML Foundation — **COMPLETE**
@@ -25,10 +25,67 @@ The long-term goal of PatchGuard is to build a real-world software engineering b
 > 4. Real-Data ML Pipeline — **COMPLETE**
 > 5. Risk Prediction Engine — **COMPLETE**
 > 6. LLM Code-Change Analysis & CLI — **COMPLETE**
-> 7. **Local PR Analysis Core (Phase 7.1) — COMPLETE**
-> 8. **GitHub API / Workflow Integration (Phase 7.2) — NEXT**
-> 9. Developer Dashboard
-> 10. Productionization
+> 7. Local PR Analysis Core (Phase 7.1) — **COMPLETE**
+> 8. **GitHub Read-Only PR Retrieval + Adapter (Phase 7.2.1) — COMPLETE**
+> 9. **GitHub Repository Acquisition (Phase 7.2.2) — NEXT**
+> 10. Developer Dashboard
+> 11. Productionization
+
+---
+
+## Phase 7.2.1 GitHub Read-Only PR Retrieval & Adapter Implementation & Verification
+
+Completed Phase 7.2.1 (GitHub Read-Only PR Retrieval + Adapter), enabling PatchGuard to retrieve pull request metadata from GitHub API and convert it into the existing `PRAnalysisInput` for downstream analysis.
+
+### 1. COMPLETED
+- Implemented `GitHubAppAuthenticator` in `src/github/auth.py` handling RS256 JWT generation and GitHub App installation access token exchange.
+- Defined `GitHubPullRequest` domain model in `src/github/schema.py` representing metadata (`owner`, `repository`, `number`, `title`, `html_url`, `base_ref`, `base_sha`, `head_ref`, `head_sha`, `state`).
+- Implemented read-only `GitHubClient` in `src/github/client.py` for GET `/repos/{owner}/{repo}/pulls/{pull_number}` retrieval with input validation and HTTP error mapping.
+- Implemented `GitHubPRAdapter` in `src/github/adapter.py` mapping `GitHubPullRequest` base/head commit SHAs directly to `PRAnalysisInput`.
+- Added `github-pr-analyze` CLI subcommand (`python src/cli.py github-pr-analyze --repo owner/repo --pr 42`) supporting text card rendering and structured JSON formats.
+- Created custom exception hierarchy in `src/github/exceptions.py` (`GitHubIntegrationError`, `GitHubConfigError`, `GitHubAuthError`, `GitHubAPIError`, `GitHubPRNotFoundError`, `GitHubPRValidationError`).
+- Added dependencies `pyjwt>=2.8.0` and `cryptography>=41.0.0` to `requirements.txt`.
+- Comprehensive test suite added in `tests/test_github_integration.py` expanding test suite count to 121 passing unit tests (100% offline).
+
+### 2. CURRENT STATE
+- Phase 7.2.1 GitHub Read-Only PR Retrieval + Adapter is COMPLETE and tested.
+- Subcommand `patchguard github-pr-analyze` is active.
+- GitHub webhooks, PR comments, Checks, automatic repo cloning, and merge blocking are NOT implemented.
+
+### 3. DESIGN DECISIONS
+- **Architectural Decoupling**: GitHub API client and adapter are strictly decoupled from `PRAnalyzer`, Phase 5 ML prediction, and Phase 6 LLM analysis. `PRAnalyzer` remains usable offline without GitHub credentials.
+- **GitHub App Authentication**: Configured via environment variables (`GITHUB_APP_ID`, `GITHUB_APP_PRIVATE_KEY` / `GITHUB_APP_PRIVATE_KEY_PATH`, `GITHUB_INSTALLATION_ID`).
+- **Token Security & Secret Hygiene**: Private keys, JWT tokens, and installation access tokens are never logged, printed in CLI outputs, or exposed in exception messages.
+- **SHA & Parameter Validation**: Owner, repository name, PR number, and 40-character hex commit SHAs are strictly validated before adapter conversion.
+- **Untrusted Input Security Boundary**: PR metadata and diffs retrieved from external platforms are treated as untrusted input. PatchGuard does not execute repository code or build scripts.
+
+### 4. FILES CHANGED
+- `src/github/exceptions.py` (New): Custom exception hierarchy.
+- `src/github/schema.py` (New): `GitHubPullRequest` domain model.
+- `src/github/auth.py` (New): `GitHubAppConfig` and `GitHubAppAuthenticator`.
+- `src/github/client.py` (New): `GitHubClient` read-only API client.
+- `src/github/adapter.py` (New): `GitHubPRAdapter` converter.
+- `src/github/__init__.py` (New): Package exports.
+- `src/cli.py` (Modified): Added `github-pr-analyze` subcommand and `render_github_pr_text_card`.
+- `requirements.txt` (Modified): Added `pyjwt>=2.8.0` and `cryptography>=41.0.0`.
+- `tests/test_github_integration.py` (New): Unit and CLI test suite (23 new test cases).
+- `PROJECT_LOG.md` (Modified): Updated handoff, current stage, and engineering log.
+- `README.md` (Modified): Documented `github-pr-analyze` CLI command and GitHub retrieval capabilities.
+
+### 5. TEST RESULTS
+- Total test suite count: **121 passing unit tests** across 10 test modules (98 base + 23 GitHub integration tests).
+- Operates 100% offline using mocked HTTP handlers and fake credentials.
+- CLI smoke tests for `github-pr-analyze` (text & JSON formats) verified.
+
+### 6. KNOWN LIMITATIONS
+- Phase 7.2.1 retrieves PR metadata and adapts base/head SHAs to `PRAnalysisInput`. Full Git-backed commit risk prediction and diff analysis on remote PRs requires repository acquisition in Phase 7.2.2.
+- Webhooks, PR comments, and GitHub Actions integration are not implemented.
+
+### 7. GIT CHECKPOINT
+- Milestone Commit: `Add GitHub PR retrieval adapter`
+
+### 8. NEXT STEP
+- Phase 7.2.2 (Authenticated Repository Acquisition for GitHub PR Analysis).
 
 ---
 

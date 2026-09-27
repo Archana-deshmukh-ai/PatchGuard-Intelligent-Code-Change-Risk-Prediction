@@ -12,17 +12,18 @@ The long-term goal of PatchGuard is to serve as an intelligent assistant in deve
 ---
 
 ## 2. Current Project Status
-**Phase 7.1 Complete — Local PR Analysis Core**
+**Phase 7.2.1 Complete — GitHub Read-Only PR Retrieval + Adapter**
 
-PatchGuard features a unified Command Line Interface (`src/cli.py`) orchestrating quantitative ML risk prediction (`patchguard predict`), single-commit qualitative LLM code-change analysis (`patchguard analyze`), and local Pull Request analysis (`patchguard pr-analyze`).
+PatchGuard features a unified Command Line Interface (`src/cli.py`) orchestrating quantitative ML risk prediction (`patchguard predict`), single-commit qualitative LLM code-change analysis (`patchguard analyze`), local Pull Request analysis (`patchguard pr-analyze`), and GitHub Pull Request retrieval and analysis (`patchguard github-pr-analyze`).
 
 - **Unified CLI Subcommands**:
   - `patchguard predict`: Invokes Phase 5 `RiskPredictionEngine` to evaluate 10 commit-level features and report calibrated defect risk against threshold 0.35.
   - `patchguard analyze`: Orchestrates Git diff extraction, prompt construction, LLM inference (via `mock` or `openai`), response parsing, and evidence validation into a combined analysis report.
   - `patchguard pr-analyze`: Orchestrates local Pull Request analysis by evaluating per-commit ML predictions for each commit in the PR and cumulative BASE->HEAD LLM qualitative code change analysis.
+  - `patchguard github-pr-analyze`: Retrieves GitHub Pull Request metadata via GitHub API (`GitHubClient`), converts it into local `PRAnalysisInput` via `GitHubPRAdapter`, and executes local PR analysis.
 - **Provider & Format Options**: Supports `--provider mock` (default, 100% offline) and `--provider openai` (live API execution requiring `OPENAI_API_KEY`), with human-readable `--format text` card rendering or structured `--format json` output.
 - **Error Handling**: Converts pipeline errors into clean stderr messages (`[PatchGuard Error]`) with deterministic non-zero exit codes.
-- **Offline Reliability**: Full automated test suite (98 passing unit tests) operates 100% offline via mocked provider clients without external network calls.
+- **Offline Reliability**: Full automated test suite (121 passing unit tests) operates 100% offline via mocked provider clients and GitHub API mocks without external network calls.
 
 ---
 
@@ -210,8 +211,11 @@ python src/cli.py analyze --repo ./path/to/repo --commit HEAD --provider openai 
 # 12. Analyze local Pull Request (per-commit ML predictions + cumulative BASE->HEAD LLM analysis)
 python src/cli.py pr-analyze --repo ./path/to/repo --base main --head feature/my-change
 
-# 13. Analyze local Pull Request with JSON output format
-python src/cli.py pr-analyze --repo ./path/to/repo --base main --head feature/my-change --format json
+# 14. Analyze GitHub Pull Request metadata via GitHub API (read-only adapter)
+python src/cli.py github-pr-analyze --repo owner/repository --pr 42
+
+# 15. Analyze GitHub Pull Request with local git repo path override and JSON format
+python src/cli.py github-pr-analyze --repo owner/repository --pr 42 --local-repo ./path/to/repo --format json
 ```
 
 ---
@@ -235,6 +239,8 @@ python src/cli.py pr-analyze --repo ./path/to/repo --base main --head feature/my
 - [x] **Phase 5: Risk Prediction Engine** — Inference-only `RiskPredictionEngine`, thin CLI (`patchguard predict`), model signals, SHA-256 artifact hashes, 10-feature schema enforcement.
 - [x] **Phase 6: LLM Code-Change Analysis & CLI** — Structured Git diff extraction, prompt construction, LLM provider integration (Mock + OpenAI), JSON parsing, evidence validation, and unified CLI (`patchguard analyze`).
 - [x] **Phase 7.1: Local PR Analysis Core** — `PRAnalyzer`, `PRAnalysisInput`, `PRAnalysisResult`, cumulative merge-base diff extraction, per-commit ML predictions, and `patchguard pr-analyze` CLI.
-- [ ] **Phase 7.2: GitHub API / Workflow Integration** *(NEXT)* — GitHub API adapter, PR comments, and workflow status checks.
+- [x] **Phase 7.2.1: GitHub Read-Only PR Retrieval + Adapter** — Read-only `GitHubClient`, RS256 JWT / token authentication (`GitHubAppAuthenticator`), PR schema mapping (`GitHubPRAdapter`), and `github-pr-analyze` CLI subcommand.
+- [ ] **Phase 7.2.2: Repository Acquisition / Cloning** *(NEXT)* — Automatic local repository fetching/cloning for remote PR analysis.
+- [ ] **Phase 7.2.3: PR Risk Commenting & Workflow Checks** — Automated PR comments and GitHub workflow checks.
 - [ ] **Phase 8: Developer Dashboard** — Interactive UI for commit risk monitoring and audit reports.
 - [ ] **Phase 9: Productionization** — End-to-end API, containerization, and production deployment.
