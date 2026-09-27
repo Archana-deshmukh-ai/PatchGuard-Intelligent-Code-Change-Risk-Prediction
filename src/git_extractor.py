@@ -1,6 +1,7 @@
 import os
 import re
 import subprocess
+import shutil
 from typing import List, Dict, Any, Optional
 import pandas as pd
 
@@ -15,6 +16,20 @@ SOURCE_EXTENSIONS = {
 TEST_PATTERNS = [
     r'test_', r'_test\.', r'/tests?/', r'/spec/', r'Test\.java$', r'Spec\.'
 ]
+
+def _find_git_executable() -> str:
+    path = shutil.which("git")
+    if path:
+        return path
+    for fallback in [
+        r"C:\Program Files\Git\cmd\git.exe",
+        r"C:\Program Files\Git\bin\git.exe",
+        r"C:\Program Files (x86)\Git\cmd\git.exe"
+    ]:
+        if os.path.exists(fallback):
+            return fallback
+    return "git"
+
 
 class GitRepositoryExtractor:
     """
@@ -33,7 +48,8 @@ class GitRepositoryExtractor:
 
     def _run_git(self, args: List[str]) -> subprocess.CompletedProcess:
         """Executes a git command via subprocess inside the target repository."""
-        cmd = ["git"] + args
+        git_executable = _find_git_executable()
+        cmd = [git_executable] + args
         return subprocess.run(
             cmd,
             cwd=self.repo_path,

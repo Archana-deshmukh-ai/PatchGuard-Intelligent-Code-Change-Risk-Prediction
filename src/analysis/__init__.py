@@ -26,7 +26,9 @@ from .exceptions import (
     MalformedLLMResponseError,
     LLMProviderError,
     OpenAIProviderError,
-    MissingAPIKeyError
+    MissingAPIKeyError,
+    PRAnalysisError,
+    InvalidPRRefError
 )
 from .prompt import (
     PromptBuilder,
@@ -35,6 +37,12 @@ from .prompt import (
 from .parser import ResponseParser
 from .validator import EvidenceValidator
 from .analyzer import LLMCodeAnalyzer
+from .pr_schema import (
+    PRAnalysisInput,
+    PRCommitPrediction,
+    PRAnalysisResult
+)
+from .pr_analyzer import PRAnalyzer
 
 __all__ = [
     "GitDiffExtractor",
@@ -55,9 +63,16 @@ __all__ = [
     "LLMProviderError",
     "OpenAIProviderError",
     "MissingAPIKeyError",
+    "PRAnalysisError",
+    "InvalidPRRefError",
     "PromptBuilder",
     "PromptResult",
     "ResponseParser",
     "EvidenceValidator",
-    "LLMCodeAnalyzer"
+    "LLMCodeAnalyzer",
+    "PRAnalysisInput",
+    "PRCommitPrediction",
+    "PRAnalysisResult",
+    "PRAnalyzer"
 ]
+

@@ -23,3 +23,12 @@ class OpenAIProviderError(LLMProviderError):
 class MissingAPIKeyError(OpenAIProviderError):
     """Raised when the OPENAI_API_KEY environment variable is not set."""
     pass
+
+class PRAnalysisError(AnalysisError):
+    """Base exception for pull request analysis errors."""
+    pass
+
+class InvalidPRRefError(PRAnalysisError):
+    """Raised when base or head ref is invalid or no merge-base exists."""
+    pass
+

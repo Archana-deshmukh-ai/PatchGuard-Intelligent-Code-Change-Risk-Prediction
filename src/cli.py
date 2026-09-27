@@ -20,7 +20,10 @@ from src.analysis import (
     MockLLMProvider,
     OpenAIProvider,
     LLMAnalysisResult,
-    LLMProvider
+    LLMProvider,
+    PRAnalyzer,
+    PRAnalysisInput,
+    PRAnalysisResult
 )
 
 def render_text_card(res: PredictionResult) -> str:
@@ -144,6 +147,94 @@ def render_analysis_text_card(prediction: PredictionResult, analysis: LLMAnalysi
     return "\n".join(lines)
 
 
+def render_pr_analysis_text_card(res: PRAnalysisResult) -> str:
+    """Renders human-readable text report card for Pull Request analysis."""
+    lines = []
+    lines.append("==========================================================================")
+    lines.append("                 PATCHGUARD LOCAL PULL REQUEST ANALYSIS                   ")
+    lines.append("==========================================================================")
+    lines.append(f"  Repository Path        : {res.repo_path}")
+    lines.append(f"  Base Reference         : {res.base_ref} ({res.resolved_base_sha[:12]})")
+    lines.append(f"  Head Reference         : {res.head_ref} ({res.resolved_head_sha[:12]})")
+    lines.append(f"  Merge Base SHA         : {res.resolved_merge_base_sha[:12]}")
+    lines.append(f"  PR Commits Included    : {res.commit_count}")
+    lines.append("--------------------------------------------------------------------------")
+    lines.append("--- PER-COMMIT HISTORICAL ML DEFECT RISK PREDICTIONS ---")
+    if res.commits:
+        for c in res.commits:
+            msg_first_line = c.commit_message.splitlines()[0] if c.commit_message else ''
+            lines.append(f"  Commit {c.commit_hash} ({c.full_hash[:12]}): {msg_first_line}")
+            if c.prediction:
+                p = c.prediction
+                lines.append(f"    - Estimated Risk Score : {p.raw_probability:.4f} (Threshold: {p.decision_threshold:.2f})")
+                lines.append(f"    - Above Threshold      : {p.is_above_threshold} | Risk Level: {p.risk_level}")
+            else:
+                lines.append(f"    - ML Prediction Skipped: {c.error or 'N/A'}")
+            lines.append("")
+    else:
+        lines.append("  No commits introduced in this pull request comparison.")
+    lines.append("--------------------------------------------------------------------------")
+    lines.append("--- CUMULATIVE PULL REQUEST CODE CHANGE ANALYSIS (Phase 6 LLM) ---")
+    if res.is_empty or res.cumulative_analysis is None:
+        lines.append("  No code changes detected between base and head references.")
+    else:
+        analysis = res.cumulative_analysis
+        lines.append(f"  Model Provider         : {analysis.model_provider} ({analysis.model_name})")
+        lines.append("")
+        lines.append("  Summary:")
+        lines.append(f"    {analysis.summary}")
+        lines.append("")
+        lines.append("  Key Changes:")
+        if analysis.key_changes:
+            for item in analysis.key_changes:
+                lines.append(f"    - {item}")
+        else:
+            lines.append("    - None reported.")
+        lines.append("")
+        lines.append("  Potential Risk Factors:")
+        if analysis.potential_risk_factors:
+            for rf in analysis.potential_risk_factors:
+                line_str = f" (Line Range: {rf.line_range})" if rf.line_range else ""
+                verified_str = "Verified" if rf.evidence_verified else "Unverified/Ungrounded"
+                lines.append(f"    - [{rf.review_priority}] {rf.category}: {rf.description}")
+                lines.append(f"      File    : {rf.file_path}{line_str}")
+                if rf.evidence_snippet:
+                    lines.append(f"      Evidence: \"{rf.evidence_snippet}\" [{verified_str}]")
+                else:
+                    lines.append(f"      Evidence: [No snippet provided] [{verified_str}]")
+        else:
+            lines.append("    - None reported.")
+        lines.append("")
+        lines.append("  Affected Areas:")
+        if analysis.affected_areas:
+            for area in analysis.affected_areas:
+                lines.append(f"    - {area}")
+        else:
+            lines.append("    - None reported.")
+        lines.append("")
+        lines.append("  Testing Observations:")
+        if analysis.testing_observations:
+            for obs in analysis.testing_observations:
+                lines.append(f"    - {obs}")
+        else:
+            lines.append("    - None reported.")
+        lines.append("")
+        lines.append("  Recommended Review Actions:")
+        if analysis.recommended_review_actions:
+            for ra in analysis.recommended_review_actions:
+                target_str = f" (Target File: {ra.target_file})" if ra.target_file else ""
+                lines.append(f"    - {ra.action}{target_str}")
+        else:
+            lines.append("    - None reported.")
+        lines.append("")
+        lines.append("  Confidence & Audit Notes:")
+        lines.append(f"    {analysis.confidence_notes or 'None.'}")
+    lines.append("==========================================================================")
+    lines.append(f"DISCLAIMER: {res.analysis_disclaimer}")
+    lines.append("==========================================================================\n")
+    return "\n".join(lines)
+
+
 def main(args_list: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser(
         prog="patchguard",
@@ -168,6 +259,17 @@ def main(args_list: Optional[List[str]] = None) -> int:
     analyze_parser.add_argument("--threshold", "-t", type=float, default=None, help="ML decision threshold override (default: 0.35)")
     analyze_parser.add_argument("--format", "-f", choices=["text", "json"], default="text", help="Output format (default: text)")
     analyze_parser.add_argument("--models-dir", default=None, help="Directory containing ML model artifacts")
+
+    # Subcommand: pr-analyze
+    pr_parser = subparsers.add_parser("pr-analyze", help="Run local Pull Request risk analysis (per-commit ML + cumulative LLM)")
+    pr_parser.add_argument("--repo", "-r", required=True, help="Path to local Git repository")
+    pr_parser.add_argument("--base", "-b", required=True, help="Base ref or branch (e.g. main)")
+    pr_parser.add_argument("--head", required=True, help="Head ref or branch (e.g. feature/test-change)")
+    pr_parser.add_argument("--provider", "-p", choices=["mock", "openai"], default="mock", help="LLM provider to use (default: mock)")
+    pr_parser.add_argument("--model", "-m", default=None, help="Optional model name override for provider")
+    pr_parser.add_argument("--threshold", "-t", type=float, default=None, help="ML decision threshold override (default: 0.35)")
+    pr_parser.add_argument("--format", "-f", choices=["text", "json"], default="text", help="Output format (default: text)")
+    pr_parser.add_argument("--models-dir", default=None, help="Directory containing ML model artifacts")
     
     parsed = parser.parse_args(args_list)
     
@@ -251,7 +353,52 @@ def main(args_list: Optional[List[str]] = None) -> int:
             sys.stderr.write(f"[Unexpected Error] {e.__class__.__name__}: {e}\n")
             return 2
 
+    elif parsed.subcommand == "pr-analyze":
+        try:
+            # 1. Instantiate RiskPredictionEngine
+            engine = RiskPredictionEngine(models_dir=parsed.models_dir)
+
+            # 2. Instantiate selected LLM Provider
+            if parsed.provider == "mock":
+                provider: LLMProvider = MockLLMProvider()
+            elif parsed.provider == "openai":
+                provider_kwargs = {}
+                if parsed.model:
+                    provider_kwargs["model"] = parsed.model
+                provider = OpenAIProvider(**provider_kwargs)
+            else:
+                sys.stderr.write(f"[PatchGuard Error] Unsupported provider: {parsed.provider}\n")
+                return 1
+
+            # 3. Instantiate LLMCodeAnalyzer and PRAnalyzer
+            llm_analyzer = LLMCodeAnalyzer(provider=provider)
+            pr_analyzer = PRAnalyzer(predictor=engine, llm_analyzer=llm_analyzer)
+
+            # 4. Execute PR Analysis
+            pr_input = PRAnalysisInput(
+                repo_path=parsed.repo,
+                base_ref=parsed.base,
+                head_ref=parsed.head
+            )
+            result = pr_analyzer.analyze(pr_input, threshold=parsed.threshold)
+
+            # 5. Render Output
+            if parsed.format == "json":
+                print(json.dumps(result.to_dict(), indent=2))
+            else:
+                print(render_pr_analysis_text_card(result))
+
+            return 0
+
+        except PatchGuardError as pge:
+            sys.stderr.write(f"[PatchGuard Error] {pge.__class__.__name__}: {pge}\n")
+            return 1
+        except Exception as e:
+            sys.stderr.write(f"[Unexpected Error] {e.__class__.__name__}: {e}\n")
+            return 2
+
     return 0
+
 
 if __name__ == "__main__":
     sys.exit(main())

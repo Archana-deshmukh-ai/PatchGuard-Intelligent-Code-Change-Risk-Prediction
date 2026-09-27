@@ -12,16 +12,17 @@ The long-term goal of PatchGuard is to serve as an intelligent assistant in deve
 ---
 
 ## 2. Current Project Status
-**Phase 6.6 Complete — CLI Integration**
+**Phase 7.1 Complete — Local PR Analysis Core**
 
-PatchGuard features a unified Command Line Interface (`src/cli.py`) orchestrating both quantitative ML risk prediction (`patchguard predict`) and qualitative LLM code-change analysis (`patchguard analyze`).
+PatchGuard features a unified Command Line Interface (`src/cli.py`) orchestrating quantitative ML risk prediction (`patchguard predict`), single-commit qualitative LLM code-change analysis (`patchguard analyze`), and local Pull Request analysis (`patchguard pr-analyze`).
 
 - **Unified CLI Subcommands**:
   - `patchguard predict`: Invokes Phase 5 `RiskPredictionEngine` to evaluate 10 commit-level features and report calibrated defect risk against threshold 0.35.
   - `patchguard analyze`: Orchestrates Git diff extraction, prompt construction, LLM inference (via `mock` or `openai`), response parsing, and evidence validation into a combined analysis report.
+  - `patchguard pr-analyze`: Orchestrates local Pull Request analysis by evaluating per-commit ML predictions for each commit in the PR and cumulative BASE->HEAD LLM qualitative code change analysis.
 - **Provider & Format Options**: Supports `--provider mock` (default, 100% offline) and `--provider openai` (live API execution requiring `OPENAI_API_KEY`), with human-readable `--format text` card rendering or structured `--format json` output.
 - **Error Handling**: Converts pipeline errors into clean stderr messages (`[PatchGuard Error]`) with deterministic non-zero exit codes.
-- **Offline Reliability**: Full automated test suite operates 100% offline via mocked provider clients without external network calls.
+- **Offline Reliability**: Full automated test suite (98 passing unit tests) operates 100% offline via mocked provider clients without external network calls.
 
 ---
 
@@ -205,6 +206,12 @@ python src/cli.py analyze --repo ./path/to/repo --commit HEAD --provider mock --
 
 # 11. Analyze code change risk with live OpenAI provider in JSON format
 python src/cli.py analyze --repo ./path/to/repo --commit HEAD --provider openai --format json --model gpt-4o-mini
+
+# 12. Analyze local Pull Request (per-commit ML predictions + cumulative BASE->HEAD LLM analysis)
+python src/cli.py pr-analyze --repo ./path/to/repo --base main --head feature/my-change
+
+# 13. Analyze local Pull Request with JSON output format
+python src/cli.py pr-analyze --repo ./path/to/repo --base main --head feature/my-change --format json
 ```
 
 ---
@@ -227,7 +234,7 @@ python src/cli.py analyze --repo ./path/to/repo --commit HEAD --provider openai 
 - [x] **Phase 4: Real-Data ML Pipeline** — Dataset construction, 70/15/15 chronological split, Train-only scaling, multi-model baseline training, validation threshold selection, final locked test evaluation.
 - [x] **Phase 5: Risk Prediction Engine** — Inference-only `RiskPredictionEngine`, thin CLI (`patchguard predict`), model signals, SHA-256 artifact hashes, 10-feature schema enforcement.
 - [x] **Phase 6: LLM Code-Change Analysis & CLI** — Structured Git diff extraction, prompt construction, LLM provider integration (Mock + OpenAI), JSON parsing, evidence validation, and unified CLI (`patchguard analyze`).
-- [ ] **Phase 7: RAG / Repository Intelligence** *(NEXT)* — Retrieving context from repository docs, historical issues, and PR history.
+- [x] **Phase 7.1: Local PR Analysis Core** — `PRAnalyzer`, `PRAnalysisInput`, `PRAnalysisResult`, cumulative merge-base diff extraction, per-commit ML predictions, and `patchguard pr-analyze` CLI.
+- [ ] **Phase 7.2: GitHub API / Workflow Integration** *(NEXT)* — GitHub API adapter, PR comments, and workflow status checks.
 - [ ] **Phase 8: Developer Dashboard** — Interactive UI for commit risk monitoring and audit reports.
-- [ ] **Phase 9: GitHub / CI-CD Integration** — Automated PR risk bot and workflow status checks.
-- [ ] **Phase 10: Productionization** — End-to-end API, containerization, and production deployment.
+- [ ] **Phase 9: Productionization** — End-to-end API, containerization, and production deployment.

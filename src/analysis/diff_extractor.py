@@ -7,6 +7,7 @@ accurate line numbering, rename tracking, status classification, and metadata.
 import os
 import re
 import subprocess
+import shutil
 from dataclasses import dataclass, asdict
 from typing import List, Dict, Any, Optional, Tuple
 
@@ -75,6 +76,20 @@ class CommitDiff:
         """Serializes CommitDiff to standard dictionary representation."""
         return asdict(self)
 
+def _find_git_executable() -> str:
+    path = shutil.which("git")
+    if path:
+        return path
+    for fallback in [
+        r"C:\Program Files\Git\cmd\git.exe",
+        r"C:\Program Files\Git\bin\git.exe",
+        r"C:\Program Files (x86)\Git\cmd\git.exe"
+    ]:
+        if os.path.exists(fallback):
+            return fallback
+    return "git"
+
+
 class GitDiffExtractor:
     """
     Extracts complete, structured commit diff representations from a local Git repository.
@@ -97,10 +112,10 @@ class GitDiffExtractor:
         if top_level != self.repo_path and not os.path.exists(os.path.join(self.repo_path, ".git")):
             raise InvalidGitRepositoryError(f"Directory is not the root of a Git repository: {self.repo_path}")
 
-
     def _run_git(self, args: List[str]) -> subprocess.CompletedProcess:
         """Executes git command safely using subprocess."""
-        cmd = ["git"] + args
+        git_executable = _find_git_executable()
+        cmd = [git_executable] + args
         return subprocess.run(
             cmd,
             cwd=self.repo_path,
@@ -206,6 +221,94 @@ class GitDiffExtractor:
             is_merge_commit=is_merge,
             is_empty_commit=is_empty
         )
+
+    def extract_cumulative_diff(self, base_ref: str, head_ref: str) -> CommitDiff:
+        """
+        Extracts a structured CommitDiff object representing the cumulative code change
+        between base_ref and head_ref relative to their merge-base.
+        """
+        # Resolve base reference to full 40-character SHA
+        res_base = self._run_git(["rev-parse", "--verify", f"{base_ref}^{{commit}}"])
+        if res_base.returncode != 0:
+            raise CommitNotFoundError(f"Base reference not found or invalid: {base_ref}")
+        base_sha = res_base.stdout.strip()
+
+        # Resolve head reference to full 40-character SHA
+        res_head = self._run_git(["rev-parse", "--verify", f"{head_ref}^{{commit}}"])
+        if res_head.returncode != 0:
+            raise CommitNotFoundError(f"Head reference not found or invalid: {head_ref}")
+        head_sha = res_head.stdout.strip()
+
+        # Determine merge base
+        mb_res = self._run_git(["merge-base", base_sha, head_sha])
+        if mb_res.returncode != 0 or not mb_res.stdout.strip():
+            raise CommitNotFoundError(f"No common merge-base found between base '{base_ref}' and head '{head_ref}'")
+        merge_base_sha = mb_res.stdout.strip()
+
+        # Retrieve head commit metadata for authorship/timestamp
+        log_res = self._run_git(["log", "-1", "--format=%H|%an|%ae|%aI%n%B", head_sha])
+        lines = log_res.stdout.splitlines() if log_res.returncode == 0 and log_res.stdout else []
+        header_line = lines[0] if lines else ""
+        head_commit_msg = "\n".join(lines[1:]).strip() if len(lines) > 1 else ""
+
+        header_parts = header_line.split('|')
+        author = header_parts[1] if len(header_parts) > 1 else "Unknown"
+        author_email = header_parts[2] if len(header_parts) > 2 else ""
+        timestamp = header_parts[3] if len(header_parts) > 3 else ""
+
+        pr_commit_msg = f"Cumulative PR Diff ({base_ref}..{head_ref})\n\nHead Commit ({head_sha[:7]}): {head_commit_msg}"
+
+        if merge_base_sha == head_sha or base_sha == head_sha:
+            return CommitDiff(
+                full_hash=head_sha,
+                short_hash=head_sha[:7],
+                author=author,
+                author_email=author_email,
+                timestamp=timestamp,
+                commit_message=pr_commit_msg,
+                files_changed=[],
+                total_additions=0,
+                total_deletions=0,
+                is_merge_commit=False,
+                is_empty_commit=True
+            )
+
+        # Run numstat for cumulative diff from merge_base_sha to head_sha
+        numstat_res = self._run_git(["diff", "--numstat", "-M", merge_base_sha, head_sha])
+        numstat_map = {}
+        for num_line in numstat_res.stdout.splitlines():
+            num_line = num_line.strip()
+            if not num_line:
+                continue
+            num_parts = num_line.split('\t')
+            if len(num_parts) >= 3:
+                add_s, del_s, path_s = num_parts[0], num_parts[1], num_parts[2]
+                is_bin = (add_s == '-' or del_s == '-')
+                adds = int(add_s) if not is_bin else 0
+                dels = int(del_s) if not is_bin else 0
+                numstat_map[path_s] = (adds, dels, is_bin)
+
+        # Run diff patch for cumulative diff from merge_base_sha to head_sha
+        diff_res = self._run_git(["diff", "-p", "-M", "-U3", merge_base_sha, head_sha])
+        raw_diff_output = diff_res.stdout
+
+        file_diffs, total_adds, total_dels = self._parse_unified_diff(raw_diff_output, numstat_map)
+        is_empty = len(file_diffs) == 0
+
+        return CommitDiff(
+            full_hash=head_sha,
+            short_hash=head_sha[:7],
+            author=author,
+            author_email=author_email,
+            timestamp=timestamp,
+            commit_message=pr_commit_msg,
+            files_changed=file_diffs,
+            total_additions=total_adds,
+            total_deletions=total_dels,
+            is_merge_commit=False,
+            is_empty_commit=is_empty
+        )
+
 
     def _parse_unified_diff(
         self,

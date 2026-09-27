@@ -6,17 +6,17 @@
 The long-term goal of PatchGuard is to build a real-world software engineering bug-risk prediction system. The final architecture will analyze code changes (Git commits / Pull Requests), predict bug probability using Machine Learning, provide LLM-driven risk explanations, leverage RAG over repository documentation/issues/PR history, and integrate into developer CI/CD workflows to give actionable recommendations.
 
 ## Current Stage
-**Phase 6 Complete — LLM Code-Change Analysis & CLI Completed, Tested, and Checkpointed**
+**Phase 7.1 Complete — Local PR Analysis Core Completed, Tested, and Checkpointed**
 
 ### Handoff Guide for Future AI / Developer Sessions
 > [!IMPORTANT]
-> **Phase 6 is COMPLETE and CHECKPOINTED**.
-> **DO NOT START PHASE 7 IMPLEMENTATION YET.**
+> **Phase 7.1 is COMPLETE and CHECKPOINTED**.
 >
 > When resuming development in a future session:
 > 1. First inspect [`README.md`](file:///c:/Projects/CODE_project/bug-prediction/README.md), [`PROJECT_LOG.md`](file:///c:/Projects/CODE_project/bug-prediction/PROJECT_LOG.md), `git status`, and `git log`.
-> 2. Understand that Phase 6 (Offline Git Diff Extraction, Analysis Schemas, Prompt Builder, Response Parser, Evidence Validator, OpenAI Provider Integration, CLI Orchestration, and Verification) is complete, tested with 81 passing unit tests, and fully checkpointed.
-> 3. The next phase is **Phase 7 — RAG / Repository Intelligence**.
+> 2. Understand that Phase 7.1 (Local PR Analysis Core: `PRAnalyzer`, `PRAnalysisInput`, `PRAnalysisResult`, cumulative merge-base diff extraction, per-commit ML predictions, `pr-analyze` CLI subcommand, and 98 passing unit tests) is complete and tested.
+> 3. GitHub API integration, webhooks, PR comments, PR checks, and authentication are NOT yet implemented.
+> 4. The next phase is **Phase 7.2 — GitHub API Adapter & PR Workflow Integration**.
 >
 > **Long-Term Roadmap**:
 > 1. Project & ML Foundation — **COMPLETE**
@@ -25,10 +25,64 @@ The long-term goal of PatchGuard is to build a real-world software engineering b
 > 4. Real-Data ML Pipeline — **COMPLETE**
 > 5. Risk Prediction Engine — **COMPLETE**
 > 6. LLM Code-Change Analysis & CLI — **COMPLETE**
-> 7. **RAG / Repository Intelligence — NEXT**
-> 8. Developer Dashboard
-> 9. GitHub / CI-CD Integration
+> 7. **Local PR Analysis Core (Phase 7.1) — COMPLETE**
+> 8. **GitHub API / Workflow Integration (Phase 7.2) — NEXT**
+> 9. Developer Dashboard
 > 10. Productionization
+
+---
+
+## Phase 7.1 Local PR Analysis Core Implementation & Verification
+
+Completed Phase 7.1 (Local PR Analysis Core), extending PatchGuard with the capability to analyze pull-request-style code changes locally using a BASE reference and HEAD reference.
+
+### 1. COMPLETED
+- Introduced `PRAnalysisInput`, `PRCommitPrediction`, and `PRAnalysisResult` domain models in `src/analysis/pr_schema.py`.
+- Implemented `PRAnalyzer` orchestrator in `src/analysis/pr_analyzer.py` combining per-commit Phase 5 ML predictions and cumulative BASE->HEAD Phase 6 LLM diff analysis.
+- Extended `GitDiffExtractor` with `extract_cumulative_diff(base_ref, head_ref)` computing merge-base diffs.
+- Added `pr-analyze` CLI subcommand (`python src/cli.py pr-analyze --repo <path> --base <base> --head <head>`) supporting text card rendering and structured JSON output formats.
+- Added custom exception `InvalidPRRefError` in `src/analysis/exceptions.py`.
+- Comprehensive test suite added in `tests/test_pr_analyzer.py` expanding test suite count to 98 passing unit tests (100% offline).
+
+### 2. CURRENT STATE
+- Phase 7.1 Local PR Analysis Core is COMPLETE and tested.
+- Subcommand `patchguard pr-analyze` is active.
+- GitHub API integration, webhooks, PR comments, Actions, and auth are NOT implemented.
+
+### 3. DESIGN DECISIONS
+- **Architectural Preservation**: Reused existing Phase 5 `RiskPredictionEngine` and Phase 6 `LLMCodeAnalyzer` without duplicating extraction, preprocessing, prediction, prompt building, parsing, or evidence validation logic.
+- **Commit-Level ML Integrity**: Preserves individual per-commit ML risk predictions. Does NOT generate a fabricated PR-level probability or average/max score across commits.
+- **Merge-Base Diff Semantics**: Uses `git merge-base base head` for 3-dot cumulative diff extraction and commit enumeration (`git rev-list --reverse merge_base..head`).
+- **Merge Commit Handling**: Skips ML prediction for merge commits (setting `is_merge_commit=True`, `prediction=None`, and capturing explicit error note) while preserving them in the commit inventory.
+- **Same Base & Head / Empty PR**: Handles `BASE == HEAD` gracefully by returning a structured empty result without executing unnecessary LLM calls or fabricating results.
+
+### 4. FILES CHANGED
+- `src/analysis/pr_schema.py` (New): Domain models `PRAnalysisInput`, `PRCommitPrediction`, `PRAnalysisResult`.
+- `src/analysis/pr_analyzer.py` (New): Orchestrator `PRAnalyzer`.
+- `src/analysis/diff_extractor.py` (Modified): Added `extract_cumulative_diff` method and executable lookup helper.
+- `src/analysis/exceptions.py` (Modified): Added `PRAnalysisError` and `InvalidPRRefError`.
+- `src/analysis/__init__.py` (Modified): Exported new PR analysis components and exceptions.
+- `src/git_extractor.py` (Modified): Added `_find_git_executable` helper for cross-platform Git path resolution.
+- `src/cli.py` (Modified): Added `pr-analyze` subcommand and `render_pr_analysis_text_card`.
+- `tests/test_pr_analyzer.py` (New): Unit and CLI test suite (17 new test cases).
+- `PROJECT_LOG.md` (Modified): Updated handoff, current stage, and engineering log.
+- `README.md` (Modified): Documented `pr-analyze` CLI command and local PR analysis capabilities.
+
+### 5. TEST RESULTS
+- Total test suite count: **98 passing unit tests** across 9 test modules (81 base + 17 PR analyzer tests).
+- Operates 100% offline using `MockLLMProvider` and temporary Git test fixtures.
+- CLI smoke tests for `pr-analyze` (text & JSON formats) verified.
+
+### 6. KNOWN LIMITATIONS
+- Evaluates pull requests locally using Git references; does not interact with remote GitHub API or pull request comments/checks.
+- ML predictions remain commit-level; cumulative PR risk score is not generated.
+- Large cumulative diffs are subject to standard Phase 6 prompt budgeting and truncation rules.
+
+### 7. GIT CHECKPOINT
+- Milestone Commit: `Complete Phase 7.1 local PR analysis core`
+
+### 8. NEXT STEP
+- Phase 7.2 (GitHub API Adapter & PR Workflow Integration).
 
 ---
 
