@@ -12,20 +12,26 @@ The long-term goal of PatchGuard is to serve as an intelligent assistant in deve
 ---
 
 ## 2. Current Project Status
-**Phase 7.3 Complete — Automated GitHub PR Workflow + Reporting**
+**Phase 8 Complete — ML Model Benchmarking & Risk Prediction Improvement**
 
-PatchGuard features an automated GitHub Pull Request workflow orchestrator (`src/github/workflow.py`), HMAC-SHA256 webhook event validator (`src/github/webhook.py`), and idempotent PR comment reporter (`src/github/reporter.py`), alongside the unified CLI (`src/cli.py`).
+PatchGuard includes a modular ML experiment benchmarking framework (`src/experiments/`) designed to evaluate candidate ML algorithms (Logistic Regression, Random Forest, XGBoost) under strict temporal evaluation discipline without contaminating production inference artifacts.
 
-- **Automated Webhook Workflow Architecture**:
+- **Phase 8 ML Model Benchmarking Capabilities**:
+  - `src/experiments/config.py`: Defines canonical 10-feature schema, hyperparameter search grids, and path constants.
+  - `src/experiments/evaluator.py`: `ModelTrainerEvaluator` enforcing Train-only `StandardScaler` fitting, scaled vs raw feature routing, PR-AUC, ROC-AUC, Precision, Recall, F1, Accuracy, Brier score, and threshold sweeps.
+  - `src/experiments/runner.py`: `Phase8BenchmarkRunner` executing grid search on Train/Val, freezing validation operating thresholds, performing untouched final Test evaluation, and generating isolated experiment artifacts:
+    - `models/experiments/phase8/` (Model pickles)
+    - `reports/experiments/phase8/` (JSON, CSV, and Markdown benchmark reports)
+  - **Empirical Recommendation**: Benchmark results determined that neither Random Forest nor XGBoost provided a defensible, substantial PR-AUC improvement over the production Logistic Regression baseline under temporal evaluation. The production model (`models/logistic_regression_real.pkl`) remains preserved as the production default.
+- **Automated Webhook Workflow Architecture (Phase 7.3)**:
   - `GitHubPRWorkflow`: Receives incoming raw webhook payloads and HTTP headers, verifies HMAC-SHA256 signatures against `GITHUB_WEBHOOK_SECRET` before JSON parsing, filters for supported actions (`opened`, `synchronize`, `reopened`), retrieves PR metadata via `GitHubClient`, acquires authenticated temporary workspace via `RepositoryAcquisitionManager`, runs per-commit ML defect predictions and cumulative LLM diff analysis via `PRAnalyzer`, and publishes markdown risk reports to GitHub PRs via `GitHubPRReporter`.
   - `GitHubPRReporter`: Formats markdown PR comments with stable idempotency tag `<!-- patchguard-report -->`. Searches existing PR issue comments (GET `/repos/{owner}/{repo}/issues/{number}/comments`) and updates existing comments (PATCH) instead of creating duplicate comments (POST) on `synchronize` events.
 - **Security & Secret Hygiene Boundary**:
   - HMAC-SHA256 signature verification uses constant-time comparison (`hmac.compare_digest`) before JSON parsing.
   - Zero repository code execution (no setup.py, npm, build, or test scripts executed).
   - Credentials, JWTs, installation tokens, and authorization headers are sanitized and never exposed in logs, tracebacks, exception strings, or GitHub PR comments.
-  - Required GitHub App Permissions: Minimum read-only repository contents (`contents:read`), pull requests (`pull_requests:read`), and issue/PR comment write access (`issues:write`).
 - **Offline Test Verification**:
-  - Full automated test suite (160 passing unit tests) operates 100% offline using mock HTTP fetchers and temporary Git repositories without external network dependencies.
+  - Full automated test suite (170 passing unit tests) operates 100% offline using mock HTTP fetchers, temporary Git repositories, and isolated experiment runners without external network dependencies.
 
 
 ---

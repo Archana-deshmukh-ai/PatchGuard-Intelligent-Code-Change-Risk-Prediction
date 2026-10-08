@@ -6,18 +6,19 @@
 The long-term goal of PatchGuard is to build a real-world software engineering bug-risk prediction system. The final architecture will analyze code changes (Git commits / Pull Requests), predict bug probability using Machine Learning, provide LLM-driven risk explanations, leverage RAG over repository documentation/issues/PR history, and integrate into developer CI/CD workflows to give actionable recommendations.
 
 ## Current Stage
-**Phase 7.3 Complete — Automated GitHub PR Workflow + Reporting Completed, Tested, and Checkpointed**
+**Phase 8 Complete — ML Model Benchmarking & Risk Prediction Improvement Completed, Tested, and Documented**
 
 
 ### Handoff Guide for Future AI / Developer Sessions
 > [!IMPORTANT]
-> **Phase 7.3 is COMPLETE and CHECKPOINTED**.
+> **Phase 8 is COMPLETE and CHECKPOINTED**.
 >
 > When resuming development in a future session:
 > 1. First inspect [`README.md`](file:///c:/Projects/CODE_project/bug-prediction/README.md), [`PROJECT_LOG.md`](file:///c:/Projects/CODE_project/bug-prediction/PROJECT_LOG.md), `git status`, and `git log`.
-> 2. Understand that Phase 7.3 (Automated GitHub PR Workflow + Reporting: `WebhookEventHandler`, HMAC-SHA256 signature verification, `GitHubPRWorkflow` orchestrator, `GitHubPRReporter` comment reporter with `<!-- patchguard-report -->` idempotency, and 160 passing offline unit tests) is complete and tested.
-> 3. Understand that Phase 7.3 receives incoming GitHub PR webhook events, verifies HMAC-SHA256 signatures before JSON parsing, filters for supported actions (`opened`, `synchronize`, `reopened`), retrieves PR metadata via `GitHubClient`, acquires an authenticated temporary workspace via `RepositoryAcquisitionManager`, runs per-commit ML risk predictions and cumulative LLM diff analysis via `PRAnalyzer`, and publishes or updates PR markdown comments via `GitHubPRReporter`.
-> 4. The next milestone is **Phase 8 — Developer Dashboard**.
+> 2. Understand that Phase 8 (ML Model Benchmarking & Risk Prediction Improvement: `src/experiments/config.py`, `src/experiments/evaluator.py`, `src/experiments/runner.py`, isolated artifacts under `models/experiments/phase8/` and `reports/experiments/phase8/`, and 170 passing unit tests) is complete and tested.
+> 3. Understand that Phase 8 benchmarked candidate models (Logistic Regression, Random Forest, XGBoost) under strict temporal split boundaries (Train 1,181 / Val 253 / Test 253), evaluated PR-AUC, ROC-AUC, Precision, Recall, F1, and Brier Score, and concluded that neither Random Forest nor XGBoost provided a defensible, substantial improvement over the production Logistic Regression baseline.
+> 4. The production model artifacts (`models/logistic_regression_real.pkl` and `models/real_data_scaler.pkl`) and Phase 5 prediction behavior remain 100% preserved and untouched.
+> 5. The next milestone is **Phase 9 — Developer Dashboard**.
 >
 > **Long-Term Roadmap**:
 > 1. Project & ML Foundation — **COMPLETE**
@@ -29,12 +30,48 @@ The long-term goal of PatchGuard is to build a real-world software engineering b
 > 7. Local PR Analysis Core (Phase 7.1) — **COMPLETE**
 > 8. GitHub Read-Only PR Retrieval + Adapter (Phase 7.2.1) — **COMPLETE**
 > 9. Authenticated GitHub Repository Acquisition (Phase 7.2.2) — **COMPLETE**
-> 10. **Automated GitHub PR Workflow + Reporting (Phase 7.3) — COMPLETE**
-> 11. **Developer Dashboard — NEXT**
-> 12. Productionization
+> 10. Automated GitHub PR Workflow + Reporting (Phase 7.3) — **COMPLETE**
+> 11. **ML Model Benchmarking & Risk Prediction Improvement (Phase 8) — COMPLETE**
+> 12. **Developer Dashboard — NEXT**
+> 13. Productionization
 
 
 ---
+
+## Phase 8 ML Model Benchmarking & Risk Prediction Improvement Implementation & Verification
+
+Completed Phase 8 (ML Model Benchmarking & Risk Prediction Improvement), introducing a rigorous, leakage-safe experimental framework under `src/experiments/` to systematically benchmark candidate machine learning algorithms (Logistic Regression, Random Forest, XGBoost) against PatchGuard's historical code-change risk prediction problem.
+
+### 1. BENCHMARK RESULTS SUMMARY
+
+| Model Algorithm | Frozen Threshold | Validation PR-AUC | Validation ROC-AUC | Validation F1 | Test PR-AUC | Test ROC-AUC | Test F1 | Test Precision | Test Recall | Winner Status |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| **Production Logistic Regression (Locked Baseline)** | `0.35` | 0.6220 | 0.7924 | 0.6509 | 0.3086 | 0.6709 | 0.4211 | 0.3168 | 0.6275 | Baseline Anchor |
+| **Phase 8 Logistic Regression ($C=10.0$)** | `0.35` | 0.6273 | 0.7953 | 0.6467 | 0.3115 | 0.6732 | 0.4238 | 0.3200 | 0.6275 | Candidate |
+| **Phase 8 Random Forest ($n=200, depth=5$)** | `0.45` | 0.6127 | 0.7909 | 0.6242 | 0.3778 | 0.7089 | 0.4211 | 0.3415 | 0.5490 | Candidate |
+| **Phase 8 XGBoost ($n=200, depth=4, lr=0.1$)** | `0.40` | **0.6293** | 0.7817 | 0.6258 | **0.3535** | **0.7122** | **0.4697** | 0.3827 | 0.6078 | **Validation Winner** |
+
+### 2. KEY FINDINGS & RECOMMENDATION
+- **Validation Comparison**: XGBoost achieved the highest Validation PR-AUC (0.6293), representing a minor +0.0073 (+0.73%) difference over the production Logistic Regression baseline (0.6220).
+- **Temporal Degradation**: All models experienced performance degradation on the unseen temporal test set due to class distribution shift (positive rate dropping from 45.05% in Train to 29.64% in Val to 20.16% in Test).
+- **Recommendation**: **`PRESERVE_PRODUCTION_LOGISTIC_REGRESSION`**. The slight validation PR-AUC margin (+0.73%) does not provide a defensible or substantial justification for replacing the linear Logistic Regression production model, which provides direct mathematical log-odds feature contributions ($C_i = \beta_i \cdot z_i$) and zero tree library dependency overhead in Phase 5.
+- **Production Preservation**: `models/logistic_regression_real.pkl` and `models/real_data_scaler.pkl` remain 100% untouched and unmodified.
+
+### 3. COMPLETED MODULES & ARTIFACTS
+- `src/experiments/config.py`: Defined canonical 10-feature schema, hyperparameter search grids, threshold spectrum (0.10 to 0.90), and paths.
+- `src/experiments/evaluator.py`: Implemented leakage-safe `ModelTrainerEvaluator`, fitting `StandardScaler` strictly on `X_train`, routing scaled vs raw features, and computing PR-AUC, ROC-AUC, Precision, Recall, F1, Accuracy, Brier score, and operating points.
+- `src/experiments/runner.py`: Implemented `Phase8BenchmarkRunner` orchestrating grid search, validation threshold freezing, test evaluation, and exporting isolated experiment artifacts:
+  - `models/experiments/phase8/logisticregression_phase8.pkl`
+  - `models/experiments/phase8/randomforest_phase8.pkl`
+  - `models/experiments/phase8/xgboost_phase8.pkl`
+  - `models/experiments/phase8/phase8_scaler.pkl`
+  - `reports/experiments/phase8/phase8_model_benchmark.json`
+  - `reports/experiments/phase8/phase8_benchmark_summary.csv`
+  - `reports/experiments/phase8/PHASE8_BENCHMARK_REPORT.md`
+- Added 10 comprehensive unit tests in `tests/test_phase8_benchmarking.py`, bringing full offline test suite to **170 passing unit tests** (100% offline).
+
+---
+
 
 ## Phase 7.3 Automated GitHub PR Workflow + Reporting Implementation & Verification
 
