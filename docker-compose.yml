@@ -1,0 +1,31 @@
+version: '3.8'
+
+services:
+  patchguard-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: patchguard:latest
+    container_name: patchguard-api
+    ports:
+      # Bind to localhost by default for unauthenticated local development security
+      - "127.0.0.1:8000:8000"
+      # For public/network exposure, configure PATCHGUARD_API_KEY and use:
+      # - "8000:8000"
+    environment:
+      - PATCHGUARD_HOST=0.0.0.0
+      - PATCHGUARD_PORT=8000
+      - PATCHGUARD_REPOS_ROOT=/repositories
+      - PATCHGUARD_MODELS_DIR=/app/models
+      # Set API key for authenticated deployment
+      # - PATCHGUARD_API_KEY=your-secure-api-key
+    volumes:
+      # Mount host directory containing Git repositories (read-only for inference safety)
+      - ./repositories:/repositories:ro
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:8000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped

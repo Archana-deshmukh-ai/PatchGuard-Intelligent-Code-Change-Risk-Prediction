@@ -225,11 +225,69 @@ python src/cli.py github-pr-analyze --repo owner/repository --pr 42
 
 # 15. Analyze GitHub Pull Request with local git repo path override and JSON format
 python src/cli.py github-pr-analyze --repo owner/repository --pr 42 --local-repo ./path/to/repo --format json
+
+# 16. Run local Streamlit Developer Dashboard (Commit Risk Inspector)
+streamlit run src/ui/app.py
+
+# 17. Run local PatchGuard REST API development server (Phase 10.2)
+uvicorn src.api.app:app --host 127.0.0.1 --port 8000
+
+# 18. Build and run Docker container (Phase 10.3)
+docker build -t patchguard:latest .
+docker run -d --name patchguard-api -p 127.0.0.1:8000:8000 -v /path/to/repositories:/repositories:ro patchguard:latest
+
+# 19. Run single commit risk prediction via REST API (Phase 10.2)
+curl -X POST http://127.0.0.1:8000/v1/predictions/commit \
+  -H "Content-Type: application/json" \
+  -d '{"repository": "my_project", "commit_hash": "HEAD"}'
 ```
 
 ---
 
-## 9. Current Limitations & Key Learnings
+## 9. Docker Containerization & Deployment Architecture (Phase 10.3)
+
+PatchGuard is packaged as a reproducible, multi-stage Docker container (`Dockerfile`) designed for secure, non-root execution:
+
+* **Base Image**: `python:3.12-slim-bookworm` (explicit Debian-based slim runtime).
+* **Virtual Environment**: Isolated `/opt/venv` virtual environment in multi-stage build.
+* **Security & Non-Root Execution**: Runs under unprivileged user `patchguard` (UID/GID `10001`). Zero root daemon privileges.
+* **System Dependencies**: Includes `git` (for repository mining and diff extraction), `curl` (for health probing), and `libgomp1` (OpenMP support for ML inference).
+* **Git Safe Directory**: Configured system-level `safe.directory` for `/repositories/*` to eliminate permission collisions across host-mounted volumes.
+* **Repository Volume-Mount Strategy**:
+  - The container expects host Git repositories mounted at `/repositories` (or custom path via `PATCHGUARD_REPOS_ROOT`).
+  - Read-only mounting (`:ro`) is strongly recommended for inference safety:
+    ```bash
+    docker run -d \
+      --name patchguard-api \
+      -p 127.0.0.1:8000:8000 \
+      -e PATCHGUARD_API_KEY="your-secret-api-key" \
+      -e PATCHGUARD_REPOS_ROOT="/repositories" \
+      -v /absolute/path/to/repositories:/repositories:ro \
+      patchguard:latest
+    ```
+* **Developer Dashboard in Docker**:
+  - The same container image can run the Streamlit dashboard by overriding the entrypoint command:
+    ```bash
+    docker run -d \
+      --name patchguard-dashboard \
+      -p 127.0.0.1:8501:8501 \
+      -v /absolute/path/to/repositories:/repositories:ro \
+      patchguard:latest \
+      streamlit run src/ui/app.py --server.port=8501 --server.address=0.0.0.0
+    ```
+* **Docker Compose**: A ready-to-run `docker-compose.yml` is provided for local orchestration (`docker compose up -d`), binding to `127.0.0.1:8000` by default.
+* **Container Health Check**:
+  - Built-in `HEALTHCHECK` directive queries `http://localhost:8000/health` every 30 seconds (`curl -f || exit 1`).
+* **Environment Configuration**:
+  - `PATCHGUARD_API_KEY`: API key for `X-API-Key` constant-time authentication.
+  - `PATCHGUARD_REPOS_ROOT`: Absolute container path for repository allowlisting (default: `/repositories`).
+  - `PATCHGUARD_MODELS_DIR`: Directory holding trained model artifacts (default: `/app/models`).
+  - `PATCHGUARD_HOST` / `PATCHGUARD_PORT`: Network binding interface and port (defaults: `0.0.0.0:8000` in container).
+* **Production Exposure Notice**: The container exposes plain HTTP on port 8000. For public or multi-tenant deployments, terminate TLS and manage certificates using a reverse proxy (e.g. Nginx, Traefik, or Caddy) in front of the container.
+
+---
+
+## 10. Current Limitations & Key Learnings
 
 1. **Shallow Feature Representation**: Commit-level diff metrics capture commit size and dispersion, but do not capture deep AST structure or semantic code logic.
 2. **Detection of Small Patches**: Small, single-file bug fixes produce small diff footprints, making them harder for churn metrics alone to detect (leading to False Negatives).
@@ -238,11 +296,12 @@ python src/cli.py github-pr-analyze --repo owner/repository --pr 42 --local-repo
 5. **Uncalibrated Probability Scores**: Model probabilities represent discrimination scores and have not yet been formally calibrated into real-world probabilities.
 6. **Synchronous Webhook Processing**: Webhook event processing operates synchronously within the request handler; background job queues (Redis/Celery) are intentionally out of scope for Phase 7.3.
 7. **External Fork PR Acquisition**: Pull requests originating from external repository forks where head commit SHAs are not present in the base repository require fetching from fork remotes; cross-repository fork PR acquisition is currently unsupported in Phase 7.3.
+8. **Local API Security Boundary**: The Phase 10.2 REST API operates in a local-development boundary anchored to `127.0.0.1` and `PATCHGUARD_REPOS_ROOT`. It enforces repository allowlisting, suppresses internal paths, rejects client-supplied threshold overrides, and is not designed for public unauthenticated exposure.
 
 
 ---
 
-## 10. Project Roadmap
+## 11. Project Roadmap
 
 - [x] **Phase 1: Project & ML Foundation** — Supervised binary classification framing, synthetic pipeline verification, baseline evaluation metrics.
 - [x] **Phase 2: Real Git Repository Mining** — Subprocess-based `GitRepositoryExtractor` parsing 10 commit-time diff features across Git history.
@@ -254,5 +313,8 @@ python src/cli.py github-pr-analyze --repo owner/repository --pr 42 --local-repo
 - [x] **Phase 7.2.1: GitHub Read-Only PR Retrieval + Adapter** — Read-only `GitHubClient`, RS256 JWT / token authentication (`GitHubAppAuthenticator`), PR schema mapping (`GitHubPRAdapter`), and `github-pr-analyze` CLI subcommand.
 - [x] **Phase 7.2.2: Authenticated GitHub Repository Acquisition** — `RepositoryAcquisitionManager`, temporary workspace lifecycle, `-c include.path` secure token transport, SHA & origin URL validation, end-to-end `github-pr-analyze` CLI.
 - [x] **Phase 7.3: Automated GitHub PR Workflow + Reporting** — Webhook HMAC-SHA256 signature verification, event filtering (`opened`, `synchronize`, `reopened`), `GitHubPRWorkflow` orchestration, and idempotent markdown PR comment reporting (`GitHubPRReporter`).
-- [ ] **Phase 8: Developer Dashboard** *(NEXT)* — Interactive UI for commit risk monitoring and audit reports.
-- [ ] **Phase 9: Productionization** — End-to-end API, containerization, and production deployment.
+- [x] **Phase 8: ML Model Benchmarking & Risk Prediction Improvement** — Temporal benchmarking of Logistic Regression, Random Forest, and XGBoost; decision `PRESERVE_PRODUCTION_LOGISTIC_REGRESSION` at threshold 0.35.
+- [x] **Phase 9: Developer Dashboard** — Interactive Streamlit UI for commit risk monitoring, audit reports, qualitative LLM analysis, read-only ML benchmark comparison, and Pull Request exploration (Phases 9.1–9.5 complete).
+- [x] **Phase 10.2: REST API & Automated Tests** — FastAPI service, Pydantic v2 schemas, endpoints (/health, /ready, /v1/predictions/commit), API key auth, repository allowlisting, locked 0.35 threshold.
+- [x] **Phase 10.3: Docker Containerization & Verification** — Multi-stage Dockerfile (python:3.12-slim), non-root user (10001), Git CLI, health check, volume-mount design, docker-compose.yml.
+- [ ] **Phase 10.4: CI/CD & Deployment Readiness** — Automated GitHub Actions CI workflow, security auditing, and production release.

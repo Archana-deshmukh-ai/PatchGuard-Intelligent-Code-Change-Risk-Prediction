@@ -6,19 +6,27 @@
 The long-term goal of PatchGuard is to build a real-world software engineering bug-risk prediction system. The final architecture will analyze code changes (Git commits / Pull Requests), predict bug probability using Machine Learning, provide LLM-driven risk explanations, leverage RAG over repository documentation/issues/PR history, and integrate into developer CI/CD workflows to give actionable recommendations.
 
 ## Current Stage
-**Phase 8 Complete — ML Model Benchmarking & Risk Prediction Improvement Completed, Tested, and Documented**
+**Phase 10.3 Complete — Docker Containerization Designed, Implemented, and Documented**
 
 
 ### Handoff Guide for Future AI / Developer Sessions
 > [!IMPORTANT]
-> **Phase 8 is COMPLETE and CHECKPOINTED**.
+> **Phase 10.3 (Docker Containerization & Verification) is COMPLETE and CHECKPOINTED**.
 >
 > When resuming development in a future session:
-> 1. First inspect [`README.md`](file:///c:/Projects/CODE_project/bug-prediction/README.md), [`PROJECT_LOG.md`](file:///c:/Projects/CODE_project/bug-prediction/PROJECT_LOG.md), `git status`, and `git log`.
-> 2. Understand that Phase 8 (ML Model Benchmarking & Risk Prediction Improvement: `src/experiments/config.py`, `src/experiments/evaluator.py`, `src/experiments/runner.py`, isolated artifacts under `models/experiments/phase8/` and `reports/experiments/phase8/`, and 170 passing unit tests) is complete and tested.
-> 3. Understand that Phase 8 benchmarked candidate models (Logistic Regression, Random Forest, XGBoost) under strict temporal split boundaries (Train 1,181 / Val 253 / Test 253), evaluated PR-AUC, ROC-AUC, Precision, Recall, F1, and Brier Score, and concluded that neither Random Forest nor XGBoost provided a defensible, substantial improvement over the production Logistic Regression baseline.
-> 4. The production model artifacts (`models/logistic_regression_real.pkl` and `models/real_data_scaler.pkl`) and Phase 5 prediction behavior remain 100% preserved and untouched.
-> 5. The next milestone is **Phase 9 — Developer Dashboard**.
+> 1. First inspect [`README.md`](file:///c:/Projects/CODE_project/bug-prediction/README.md), [`PROJECT_LOG.md`](file:///c:/Projects/CODE_project/bug-prediction/PROJECT_LOG.md), [`Dockerfile`](file:///c:/Projects/CODE_project/bug-prediction/Dockerfile), [`docker-compose.yml`](file:///c:/Projects/CODE_project/bug-prediction/docker-compose.yml), `git status`, and `git log`.
+> 2. Understand that Phase 10.3 implements multi-stage Docker containerization for PatchGuard:
+>    - Base image: `python:3.12-slim-bookworm` with explicit dependency layer caching.
+>    - Non-root user: `patchguard` (UID/GID `10001`). Zero root daemon privileges.
+>    - System utilities: `git` (required for commit feature mining and diff extraction) and `curl` (for health checks).
+>    - Safe volume mounting: Host repositories mounted to `/repositories:ro` (read-only for inference integrity).
+>    - Built-in `HEALTHCHECK`: Queries `http://localhost:8000/health` every 30 seconds.
+>    - Dual entrypoint support: Default runs FastAPI REST API (`uvicorn src.api.app:app --host 0.0.0.0 --port 8000`); command override allows running Streamlit dashboard (`streamlit run src/ui/app.py`).
+>    - Note on host environment: Docker CLI is not installed in the local Windows development environment (`CommandNotFoundException`); full static validation was performed and exact commands for build, run, and compose are documented.
+> 3. The REST API (`src/api/`) and Developer Dashboard (`src/ui/`) remain complete, tested, and operational.
+> 4. The production model artifacts (`models/logistic_regression_real.pkl` and `models/real_data_scaler.pkl`) and Phase 5 prediction behavior remain 100% preserved and untouched (SHA-256 verified).
+> 5. Active test suite status: standard discovery finds **258 unit tests** across 13 test modules. All 248 non-benchmark tests pass 100% offline with zero failures and zero errors. The 10 tests in `tests/test_phase8_benchmarking.py` remain safely withheld from automated regression runs to protect benchmark artifacts from regeneration.
+> 6. The authorized next implementation step upon review is **Phase 10.4 — CI/CD & Deployment Readiness**.
 >
 > **Long-Term Roadmap**:
 > 1. Project & ML Foundation — **COMPLETE**
@@ -31,10 +39,405 @@ The long-term goal of PatchGuard is to build a real-world software engineering b
 > 8. GitHub Read-Only PR Retrieval + Adapter (Phase 7.2.1) — **COMPLETE**
 > 9. Authenticated GitHub Repository Acquisition (Phase 7.2.2) — **COMPLETE**
 > 10. Automated GitHub PR Workflow + Reporting (Phase 7.3) — **COMPLETE**
-> 11. **ML Model Benchmarking & Risk Prediction Improvement (Phase 8) — COMPLETE**
-> 12. **Developer Dashboard — NEXT**
-> 13. Productionization
+> 11. ML Model Benchmarking & Risk Prediction Improvement (Phase 8) — **COMPLETE**
+> 12. Developer Dashboard (Phase 9: 9.1–9.5) — **COMPLETE**
+> 13. Productionization: Architecture Inspection & Design (Phase 10.1) — **COMPLETE**
+> 14. Productionization: REST API & Automated Tests (Phase 10.2) — **COMPLETE**
+> 15. **Productionization: Docker Containerization & Verification (Phase 10.3) — COMPLETE & HARDENED**
+> 16. Productionization: CI/CD & Deployment Readiness (Phase 10.4)
+>
+>
+> ---
+>
+> ## Phase 10.3 Docker Containerization & Independent Review Hardening
+>
+> Completed Phase 10.3 (Docker Containerization & Verification) followed by an independent engineering review and hardening audit across Phase 10.2 (REST API) and Phase 10.3 (Docker packaging).
+>
+> ### 1. HARDENING DEFECTS IDENTIFIED & RESOLVED
+> 1. **Docker Virtual Environment Isolation (`Dockerfile`)**:
+>    - *Defect*: Multi-stage build previously installed dependencies into user-site packages (`pip install --user`), introducing potential path and permission edge cases across non-root execution contexts.
+>    - *Resolution*: Replaced with standard self-contained virtual environment in `/opt/venv` (`python -m venv /opt/venv` in builder, copied into `/opt/venv` in runtime). Added `/opt/venv/bin` to `PATH`.
+> 2. **Linux Native OpenMP Dependency (`Dockerfile`)**:
+>    - *Defect*: Debian `python:3.12-slim` omits OpenMP runtime libraries, causing runtime import failure (`libgomp.so.1: cannot open shared object file`) when initializing `xgboost` or scikit-learn OpenMP routines.
+>    - *Resolution*: Added `libgomp1` to runtime Debian package installation (`apt-get install -y --no-install-recommends git curl libgomp1`).
+> 3. **Git `safe.directory` Ownership Collision (`Dockerfile`)**:
+>    - *Defect*: Host repositories volume-mounted to `/repositories` are owned by the host user UID, while the container runs as unprivileged user `patchguard` (UID 10001). Git 2.35.2+ aborts with `fatal: detected dubious ownership in repository`.
+>    - *Resolution*: Added narrowly scoped Git safe-directory configuration at system level:
+>      `git config --system --add safe.directory "/repositories/*"`
+>      `git config --system --add safe.directory "/repositories"`
+>      This strictly resolves repository mounting ownership issues without introducing insecure wildcard `*` permissions.
+> 4. **Path Traversal & Relative Dot Reference Hardening (`src/api/service.py`)**:
+>    - *Defect*: `resolve_repository_path()` allowed relative dot-references (`.` / `..`) and used prefix checking without trailing path separator enforcement, risking root escape.
+>    - *Resolution*: Added explicit rejection of dot-reference components (`.` or `..`) before resolution and enforced strict boundary check (`target_path == canonical_root or target_path.startswith(canonical_root + os.sep)`), blocking target root escape and symlink traversal.
+> 5. **Container Filesystem Path Leakage Scrubbing (`src/api/error_handlers.py`)**:
+>    - *Defect*: `_sanitize_message()` sanitized host Windows drive letters and user paths, but left container filesystem paths (`/repositories/...` and `/app/...`) exposed in API error payloads.
+>    - *Resolution*: Added regex replacements for container paths (`/repositories/...` -> `<repo>/...`, `/app/...` -> `<app>/...`) to ensure error message sanitization across both host and container environments.
+> 6. **Docker Compose Network Boundary Hardening (`docker-compose.yml`)**:
+>    - *Defect*: Exposed port `8000:8000` binding to `0.0.0.0` by default, potentially exposing an unauthenticated API service if run on a multi-homed host without an API key configured.
+>    - *Resolution*: Explicitly restricted default port mapping to `127.0.0.1:8000:8000` to preserve the local-development security boundary.
+>
+> ### 2. IMPLEMENTED COMPONENTS & DESIGN DECISIONS
+> - `Dockerfile`:
+>   1. **Stage 1 (Builder)**: Uses `python:3.12-slim-bookworm`, installs `build-essential`, and builds wheels into isolated `/opt/venv`.
+>   2. **Stage 2 (Runtime)**: Copies `/opt/venv`, sets `PATH="/opt/venv/bin:$PATH"` and `PYTHONPATH=/app`.
+>   3. **System Dependencies**: Installs `git` (required for repository mining), `curl` (for healthcheck), and `libgomp1` (for OpenMP/XGBoost).
+>   4. **Non-Root Execution**: Creates unprivileged user and group `patchguard` (UID/GID `10001`). System-level Git `safe.directory` configured for `/repositories/*`.
+>   5. **Container Healthcheck**: Configured `HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 CMD curl -f http://localhost:8000/health || exit 1`.
+>   6. **Entrypoint & Port**: Exposes port `8000` with default command `["uvicorn", "src.api.app:app", "--host", "0.0.0.0", "--port", "8000"]`.
+> - `.dockerignore`: Excludes `.git`, virtual environments (`.venv`, `venv`), caches (`__pycache__`, `.pytest_cache`), test suites (`tests/`), scratch directories, data, notebooks, and secret key files (`*.pem`, `*.key`, `.env*`).
+> - `docker-compose.yml`: Defines `patchguard-api` service with local port forwarding `127.0.0.1:8000:8000`, read-only host repository mounting (`./repositories:/repositories:ro`), healthcheck, and restart policy.
+>
+> ### 3. HOST DOCKER AVAILABILITY & VERIFICATION STATUS
+> - Inspection of the local Windows development environment confirmed that Docker CLI is not installed (`Get-Command docker -> CommandNotFoundException`).
+> - Full static validation was performed:
+>   - Multi-stage Dockerfile syntax, layer ordering, and path alignment validated.
+>   - Package dependency consistency verified against `requirements.txt`.
+>   - `.dockerignore` patterns validated against repository directory structure.
+>   - Port, user UID, and health check endpoints aligned with Phase 10.2 API implementation.
+> - Unit and integration tests verified:
+>   - `python -m unittest tests/test_api.py`: **17/17 tests passed** (added 3 new security tests).
+>   - Discovery: **258 unit tests** across 13 modules (248 non-benchmark tests 100% passing offline).
+>
+> ### 4. PRODUCTION ARTIFACT PRESERVATION
+> - `models/logistic_regression_real.pkl`: `A32B30DFF63B3A85C3FD9D9983921D5F5C5C5629ACC9C206F77759C46F60F387` (100% byte-identical).
+> - `models/real_data_scaler.pkl`: `C8E65F768DAB97ACF8DF573DA60F6B1C0E9232EBF2173677F88E3EFA5C479B49` (100% byte-identical).
+> - Production threshold locked at `0.35`. Canonical 10-feature schema ordering preserved.
+>
+> ### 5. KNOWN LIMITATIONS
+> - Docker CLI unavailable on local development host: live container execution must be verified on a Docker-enabled environment or in CI.
+> - Plain HTTP exposure: Reverse proxy (Nginx/Traefik) required for TLS termination in public deployments.
+>
+> ### 6. NEXT STEP
+> - **Phase 10.4 — CI/CD & Deployment Readiness**: Author GitHub Actions workflow (`.github/workflows/ci.yml`), automated testing gates, and release packaging.
 
+>
+>
+> ---
+>
+> ## Phase 10.2 REST API Implementation & Verification
+>
+> Completed Phase 10.2 (REST API and Automated Tests), adding an isolated, production-ready FastAPI service layer under `src/api/` backed by automated tests in `tests/test_api.py`. The REST API exposes machine-readable endpoints for system health, model readiness, and single-commit risk inference while preserving the production Logistic Regression model, StandardScaler, 10-feature schema, and locked 0.35 decision threshold without duplication.
+>
+> ### 1. IMPLEMENTED COMPONENTS & DESIGN DECISIONS
+> - `requirements.txt`: Declared `fastapi>=0.110.0` and `uvicorn>=0.28.0`.
+> - `src/api/config.py`: Implemented `APIConfig` reading `PATCHGUARD_HOST` (default `127.0.0.1`), `PATCHGUARD_PORT` (8000), `PATCHGUARD_API_KEY`, `PATCHGUARD_REPOS_ROOT`, `PATCHGUARD_MODELS_DIR`, and `git_timeout_seconds` (30.0s).
+> - `src/api/schemas.py`: Implemented Pydantic v2 schemas:
+>   - `HealthResponse`: Liveness status only.
+>   - `ReadyResponse`: Full readiness state, model ID, schema version, effective threshold (`0.35`), and SHA-256 artifact hashes.
+>   - `CommitPredictionRequest`: `repository` (regex-validated string), `commit_hash` (default `HEAD`). Enforces `model_config = ConfigDict(extra="forbid")`, strictly rejecting client-supplied threshold overrides with HTTP 422.
+>   - `CommitPredictionResponse`: Structured payload containing `commit` metadata, `prediction` metrics at threshold 0.35, `model_signals` log-odds contributions, canonical 10 `features`, and `provenance` hashes.
+>   - `ErrorResponse`: Structured errors with `code`, `message`, and `remediation`.
+> - `src/api/service.py`: Implemented `PredictionService`:
+>   - Anchors repository resolution to `canonical_root = os.path.realpath(config.allowed_repos_root)`. Validates containment using `os.path.realpath`, preventing path traversal (`..`, separators, null bytes) and symlink escapes with `ForbiddenRepositoryAccessError`.
+>   - Verifies model and scaler SHA-256 hashes against verified production constants in `check_readiness()`.
+>   - Executes inference through existing `RiskPredictionEngine` at locked threshold 0.35.
+> - `src/api/error_handlers.py`: Exception mapper:
+>   - Suppresses raw stack traces, private keys, and internal filesystem paths (`_sanitize_message`).
+>   - Maps domain exceptions to stable error codes: `AUTHENTICATION_REQUIRED` (401), `FORBIDDEN_REPOSITORY_ACCESS` (403), `REPOSITORY_NOT_FOUND` (404), `COMMIT_NOT_FOUND` (404), `UNSUPPORTED_COMMIT_TYPE` (400), `EMPTY_COMMIT` (400), `SERVICE_NOT_READY` (503), `VALIDATION_ERROR` (422), `INTERNAL_ENGINE_ERROR` (500).
+> - `src/api/app.py`: Implemented `create_app()` factory with ASGI lifespan context, dependency injection for `PredictionService`, constant-time API key verification (`hmac.compare_digest`), and route handlers for `/health`, `/ready`, and `/v1/predictions/commit`.
+> - `src/api/__init__.py`: Cleanly exported public interface.
+>
+> ### 2. VERIFICATION & TEST RESULTS
+> - `tests/test_api.py`: Implemented 14 unit and integration tests using `fastapi.testclient.TestClient`:
+>   - Health probe liveness verification without claiming readiness.
+>   - Readiness probe verification (HTTP 200 on valid artifacts, HTTP 503 on unready engine).
+>   - Commit prediction on real local Git repository fixture with full payload verification.
+>   - Strict rejection of client threshold override (`threshold=0.50` -> HTTP 422).
+>   - Path traversal and directory escape rejection (`../outside` -> HTTP 403/422).
+>   - Repository not found (404) and commit not found (404) structured error handling.
+>   - Empty commit (400 EMPTY_COMMIT) and merge commit (400 UNSUPPORTED_COMMIT_TYPE) handling.
+>   - Authentication workflows: valid API key (200), missing API key (401), invalid API key (401).
+>   - Unauthenticated access permitted for /health and /ready probes.
+>   - Error message path sanitization (suppressing raw Windows drive paths).
+>   - Post-test artifact immutability verification.
+> - Test Executions:
+>   - `python -m unittest tests/test_api.py`: **14/14 tests passed** in 30.6s.
+>   - Targeted regression suite (`test_api`, `test_prediction_engine`, `test_analysis_schema`, `test_openai_provider`, `test_cli`, `test_pr_analyzer`, `test_dashboard`): **142/142 tests passed** in 226.1s.
+>   - Total discovered unit tests: **255 tests** across 13 test modules (245 non-benchmark tests 100% passing; 10 benchmark tests safely withheld).
+>
+> ### 3. PRODUCTION ARTIFACT PRESERVATION
+> - `models/logistic_regression_real.pkl`: `A32B30DFF63B3A85C3FD9D9983921D5F5C5C5629ACC9C206F77759C46F60F387` (100% byte-identical).
+> - `models/real_data_scaler.pkl`: `C8E65F768DAB97ACF8DF573DA60F6B1C0E9232EBF2173677F88E3EFA5C479B49` (100% byte-identical).
+> - Production threshold locked at `0.35`. Canonical 10-feature schema ordering preserved.
+>
+> ### 4. KNOWN LIMITATIONS
+> - Local development boundary: bound to `127.0.0.1` when `PATCHGUARD_API_KEY` is unset; not intended for public exposure.
+> - Single-commit evaluation only: multi-commit PR evaluation and qualitative LLM endpoints are deferred to subsequent releases.
+> - Synchronous inference execution: asynchronous task queues remain out of scope for Phase 10.2.
+>
+> ### 5. NEXT STEP
+> - **Phase 10.3 — Docker Containerization & Verification**: Author multi-stage Dockerfile, .dockerignore, HEALTHCHECK, and container build verification.
+
+
+
+
+---
+
+## Phase 9.5 Pull Request Explorer UI Implementation & Verification
+
+Completed Phase 9.5 (Pull Request Explorer UI), adding a multi-commit Pull Request risk exploration and cumulative code change analysis view to `src/ui/app.py` backed by pure-Python helpers in `src/ui/pr_helpers.py`. The Pull Request Explorer enables developers to evaluate constituent PR commits using the production ML defect prediction engine, review per-commit feature tables and log-odds signal charts, and optionally generate cumulative qualitative diff explanations via the Phase 6 LLM pipeline, with complete support for both offline local Git workflows and remote GitHub repositories.
+
+### 1. IMPLEMENTED COMPONENTS & DESIGN DECISIONS
+- `src/ui/pr_helpers.py`: Implemented 6 pure-Python helper functions:
+  1. `validate_local_pr_inputs(repo_path, base_ref, head_ref)`: Validates input strings for local Git PR analysis, ensuring non-empty values before triggering subprocess Git operations.
+  2. `parse_github_pr_identifier(repo_or_url, pr_number_val=None)`: Parses either full GitHub PR URLs (e.g., `https://github.com/owner/repo/pull/42`) or `owner/repo` identifiers with explicit positive PR numbers into structured `(owner, repo, pr_number)` tuples.
+  3. `is_github_app_configured()`: Safely inspects the local execution environment for required GitHub App configuration variables (`GITHUB_APP_ID`, `GITHUB_INSTALLATION_ID`, and `GITHUB_APP_PRIVATE_KEY` / `GITHUB_APP_PRIVATE_KEY_PATH`) without exposing private key bytes or secret tokens.
+  4. `get_pr_risk_summary_stats(commits, threshold=0.35)`: Computes summary counts across constituent commits (`total_commits`, `analyzed_commits`, `defect_prone_commits`, `standard_risk_commits`, `merge_commits`, `skipped_commits`, `max_commit_risk_score`). Strictly respects model governance rules by refusing to compute an uncalibrated average probability or fabricated PR-wide score.
+  5. `format_pr_commits_table(commits)`: Formats `PRCommitPrediction` objects into presentation records containing 7-character abbreviated SHAs, sanitized author names, first-line commit summaries, ML risk scores, risk levels, and analysis statuses.
+  6. `format_pr_error(exc)`: Maps domain exceptions (`InvalidPRRefError`, `GitHubConfigError`, `GitHubAuthError`, `GitHubPRNotFoundError`, `GitHubPRValidationError`, `GitHubAPIError`, `RepositoryAcquisitionError`, `RepositoryNotFoundError`) into sanitized `(title, remediation_message)` tuples, preventing raw stack traces or credential leaks.
+- `src/ui/__init__.py`: Cleanly exported all 6 PR helper functions for public UI module consumption.
+- `src/ui/app.py`: Integrated the Pull Request Explorer view:
+  1. **Navigation Switcher**: Added `"Pull Request Explorer"` to sidebar radio navigation `dashboard_view_select`, preserving `"Commit Risk Inspector"` as default index 0 for backward compatibility.
+  2. **Dual PR Input Modes**:
+     - Local Git PR Mode (Default / Offline): Directly analyzes local branches/revisions via `PRAnalyzer` without requiring network access or GitHub tokens.
+     - GitHub PR Mode (Optional): Retrieves metadata and acquires PR commits via `GitHubClient` and `RepositoryAcquisitionManager` into temporary workspaces or local repository overrides when GitHub App credentials are configured.
+  3. **Explicit Trigger Actions**: Analysis is never run on page load or input edits. Execution requires explicit clicks on `Analyze Pull Request` (`analyze_pr_button`) or `Generate Cumulative Qualitative Analysis` (`run_pr_llm_button`).
+  4. **Session State Isolation**: Dedicated session keys (`pr_analysis_result`, `github_pr_metadata`, `pr_analysis_error`, `pr_llm_analysis`, `pr_llm_error`, `last_pr_input_key`). Editing inputs immediately invalidates stale PR results without affecting single-commit inspector or benchmark viewer state.
+  5. **PR Summary Cards & Disclaimer**: Displays 4 metric cards (Total Commits, Analyzed Commits, Flagged Defect-Prone, Skipped/Merges) and prominently renders `analysis_disclaimer` regarding the intentional absence of fabricated PR-wide scores.
+  6. **Constituent Commits Inventory**: Interactive table detailing commit SHAs, authors, summaries, ML risk scores, thresholds, and classifications.
+  7. **Commit Deep-Dive Expander**: Accordion enabling inspection of full 40-character SHAs, canonical 10-feature tables, and Altair log-odds model signal charts for individual commits within the PR.
+  8. **Optional Cumulative Qualitative LLM Analysis**: Additive Phase 6 LLM analysis on the cumulative diff (`BASE → HEAD` via merge-base) supporting `mock` (offline) and `openai` (cloud) providers with evidence grounding badges (`[Verified Grounding]` vs `[Ungrounded Citation]`). Resilient error handling ensures LLM failures never clear or corrupt valid ML prediction metrics.
+
+### 2. VERIFICATION & HEADLESS TESTING RESULTS
+- Extended `tests/test_dashboard.py` with 16 automated unit and headless integration tests:
+  - `TestPRHelpers` (9 unit tests):
+    1. `test_validate_local_pr_inputs_valid`: Validates acceptance of non-empty local parameters.
+    2. `test_validate_local_pr_inputs_empty_fields`: Validates rejection of empty repo, base, or head references.
+    3. `test_parse_github_pr_identifier_owner_repo`: Validates parsing of `owner/repo` and integer PR number.
+    4. `test_parse_github_pr_identifier_url`: Validates parsing of full GitHub PR URLs.
+    5. `test_parse_github_pr_identifier_invalid`: Validates rejection of malformed repository names and invalid numbers.
+    6. `test_is_github_app_configured`: Validates environment credential detection without leakage.
+    7. `test_get_pr_risk_summary_stats`: Validates count calculations and asserts absence of fabricated average probability.
+    8. `test_format_pr_commits_table`: Validates presentation records across analyzed, merge, and skipped commits.
+    9. `test_format_pr_error_domain_mappings`: Validates sanitized error messages across domain exception types.
+  - `TestPullRequestExplorerApp` (7 headless `AppTest` integration tests):
+    1. `test_pr_explorer_initial_render`: Verifies view switching displays prompt and zero premature metric cards.
+    2. `test_pr_explorer_local_mode_invalid_input_shows_error`: Verifies invalid base reference triggers sanitized error alert.
+    3. `test_pr_explorer_local_mode_successful_analysis`: Verifies end-to-end analysis on local Git repo fixture renders 4 metric cards and commits table.
+    4. `test_pr_explorer_github_mode_missing_config_shows_error`: Verifies unconfigured GitHub mode displays sanitized config guidance without crashing.
+    5. `test_pr_explorer_optional_mock_llm_analysis`: Verifies explicit cumulative mock LLM analysis renders summary, factors, and grounding badges.
+    6. `test_pr_explorer_llm_failure_preserves_ml_predictions`: Verifies qualitative analysis errors display alerts without corrupting ML metrics.
+    7. `test_pr_explorer_changing_input_invalidates_stale_results`: Verifies modifying PR inputs immediately purges stale PR results.
+- Test Suite Executions:
+  - `python -m unittest tests/test_dashboard.py`: **77/77 tests passed** in 94.729s (32 Phase 9.1 helper tests + 7 Phase 9.2 inspector tests + 9 Phase 9.3 LLM tests + 13 Phase 9.4 benchmark tests + 16 Phase 9.5 PR explorer tests).
+  - Safe regression suite: **128/128 tests passed** in 229.307s (`test_dashboard.py`, `test_prediction_engine.py`, `test_analysis_schema.py`, `test_openai_provider.py`, `test_cli.py`, `test_pr_analyzer.py`).
+  - Standard discovery count: **241 unit tests** across 12 test modules.
+
+### 3. PRODUCTION ARTIFACT PRESERVATION
+- `models/logistic_regression_real.pkl`: SHA-256 `A32B30DFF63B3A85C3FD9D9983921D5F5C5C5629ACC9C206F77759C46F60F387` (Verified 100% byte-identical).
+- `models/real_data_scaler.pkl`: SHA-256 `C8E65F768DAB97ACF8DF573DA60F6B1C0E9232EBF2173677F88E3EFA5C479B49` (Verified 100% byte-identical).
+- Production threshold remains locked at `0.35`. Canonical 10-feature schema remains unmodified.
+- Zero model retraining or parameter refitting executed.
+
+### 4. KNOWN LIMITATIONS
+- Cross-repository fork PR acquisition without head commits in the base repository requires local clone override.
+- Synchronous UI processing during remote acquisition/analysis; background job queues remain out of scope for Phase 9.
+- Cumulative diff budgeting enforces Phase 6 truncation limits on very large pull requests.
+
+### 5. NEXT STEP
+- **Phase 10 — Productionization**: End-to-end API, containerization, and production deployment.
+
+---
+
+## Phase 9.4 Read-Only ML Benchmark Viewer Implementation & Verification
+
+Completed Phase 9.4 (Read-Only ML Benchmark Viewer), adding an offline, non-destructive benchmark inspection dashboard view to `src/ui/app.py` backed by pure-Python helpers in `src/ui/benchmark_helpers.py`. The viewer enables developers and stakeholders to inspect, compare, and audit recorded evaluation results across Logistic Regression, Random Forest, XGBoost, and the production anchor without retraining models, modifying artifacts, or executing network calls.
+
+### 1. IMPLEMENTED COMPONENTS & DESIGN DECISIONS
+- `src/ui/benchmark_helpers.py`: Implemented 5 pure-Python helper functions:
+  1. `load_benchmark_data(benchmark_path=None)`: Safely loads the Phase 8 benchmark artifact (`reports/experiments/phase8/phase8_model_benchmark.json`). Validates file existence and JSON syntax, raising domain-friendly `FileNotFoundError` or `ValueError` upon anomalies. Completely avoids unpickling untrusted binary objects.
+  2. `format_benchmark_comparison_records(benchmark_data)`: Extracts structured comparison records for all four models (`production_logistic_regression_anchor`, `LogisticRegression`, `RandomForest`, and `XGBoost`). Cleanly separates Validation and Test splits across key evaluation metrics (PR-AUC, ROC-AUC, F1, Precision, Recall, Brier score, and degradation deltas). Preserves `None` without fabricating missing data.
+  3. `prepare_benchmark_chart_records(records, metric_choice="pr_auc")`: Converts comparison records into flat, visualization-ready records mapping candidate models and metric choices (`pr_auc`, `roc_auc`, `f1`) to categorical splits (`Validation` vs `Test`).
+  4. `get_split_integrity_summary(benchmark_data)`: Extracts chronological split sizes, defect counts, defect percentages, and chronological notes from `metadata.split_integrity`.
+  5. `get_decision_justification(benchmark_data)`: Extracts the final Phase 8 architectural decision (`PRESERVE_PRODUCTION_LOGISTIC_REGRESSION`), production threshold (`0.35`), validation winner (`XGBoost`), margin (+0.0073), test set degradation context, and model governance trade-offs.
+- `src/ui/__init__.py`: Cleanly exported all 5 benchmark helpers for public UI module consumption.
+- `src/ui/app.py`: Integrated the benchmark viewer via a sidebar view switcher and dedicated rendering functions:
+  1. **Sidebar View Switcher**: `st.sidebar.radio("View", ["Commit Risk Inspector", "ML Benchmark Viewer"], key="dashboard_view_select")`. Defaults to index 0 ("Commit Risk Inspector") to ensure existing Phase 9.2 and Phase 9.3 user flows, default initial render states, and headless assertions remain 100% backward-compatible.
+  2. **Policy Decision Banner**: Prominently highlights the Phase 8 architectural decision `PRESERVE_PRODUCTION_LOGISTIC_REGRESSION` at threshold `0.35`. Explains why XGBoost's marginal validation gain (+0.0073 Val PR-AUC) does not justify losing direct log-odds interpretability ($C_i = \beta_i \cdot z_i$) or adding complex tree library runtime dependencies in production inference, especially given that all models degraded similarly on the unseen test split due to chronological class prevalence shift.
+  3. **Chronological Split Integrity Cards**: Displays 4 metric cards: Total Commits (1,687), Train Split (1,181 @ 45.05%), Validation Split (253 @ 29.64%), and Test Split (253 @ 20.16%). Clearly explains the temporal class prevalence shift over time.
+  4. **Multi-Model Comparison Table**: Formats candidate models vs production anchor side-by-side with separate, un-conflated Validation and Test columns.
+  5. **Altair Grouped Bar Chart**: Renders side-by-side grouped bars for Validation vs Test metrics across models, with an interactive metric selectbox (`pr_auc`, `roc_auc`, `f1`). Split metrics are rendered strictly separately and never averaged together.
+  6. **Model Deep-Dive Expanders**: Individual collapsible accordions for each model displaying Confusion Matrix ($TP, FP, TN, FN$), precision, recall, Brier score, and degradation deltas.
+  7. **Resilient Error Handling**: Cleanly catches missing or malformed JSON benchmark reports with actionable remediation advice.
+
+### 2. VERIFICATION & HEADLESS TESTING RESULTS
+- Extended `tests/test_dashboard.py` with 13 automated unit and integration tests:
+  - `TestBenchmarkHelpers` (8 unit tests):
+    1. `test_load_benchmark_data_real_file`: Verifies successful loading and structure of real committed Phase 8 JSON artifact.
+    2. `test_load_benchmark_data_file_not_found`: Verifies descriptive `FileNotFoundError` when artifact is missing.
+    3. `test_load_benchmark_data_malformed_json`: Verifies descriptive `ValueError` when JSON syntax is corrupted.
+    4. `test_load_benchmark_data_missing_sections`: Verifies error handling when JSON lacks expected top-level sections.
+    5. `test_format_benchmark_comparison_records_structure`: Verifies all 4 models are extracted with separate Val and Test metrics.
+    6. `test_format_benchmark_comparison_records_missing_fields_preserved`: Verifies missing metrics remain `None` and are not fabricated.
+    7. `test_prepare_benchmark_chart_records`: Verifies chart record transformation and field mappings.
+    8. `test_get_decision_justification`: Verifies extraction of decision string, threshold, and rationale.
+  - `TestMLBenchmarkViewerApp` (5 headless `AppTest` integration tests):
+    1. `test_benchmark_viewer_view_switch`: Verifies seamless switching from Commit Risk Inspector to ML Benchmark Viewer.
+    2. `test_benchmark_viewer_displays_validation_and_test_separately`: Verifies split separation and absence of conflated metrics.
+    3. `test_benchmark_viewer_displays_all_four_models`: Verifies all 4 models appear in the comparison table.
+    4. `test_benchmark_viewer_metric_filter_change`: Verifies changing the metric selectbox updates chart rendering without crashes.
+    5. `test_benchmark_viewer_does_not_modify_production_models`: Verifies model artifacts remain untouched and byte-identical before and after rendering.
+- Test Suite Execution:
+  - `python -m unittest tests/test_dashboard.py`: **61/61 tests passed** in 52.049s (32 Phase 9.1 helper tests + 7 Phase 9.2 inspector tests + 9 Phase 9.3 LLM tests + 13 Phase 9.4 benchmark tests).
+  - Safe regression suite: **112/112 tests passed** in 126.659s (`test_dashboard.py`, `test_prediction_engine.py`, `test_analysis_schema.py`, `test_openai_provider.py`, `test_cli.py`, `test_pr_analyzer.py`).
+  - Standard discovery count: **225 unit tests** across 12 test modules.
+
+### 3. PRODUCTION ARTIFACT PRESERVATION
+- `models/logistic_regression_real.pkl`: SHA-256 `A32B30DFF63B3A85C3FD9D9983921D5F5C5C5629ACC9C206F77759C46F60F387` (Verified 100% byte-identical).
+- `models/real_data_scaler.pkl`: SHA-256 `C8E65F768DAB97ACF8DF573DA60F6B1C0E9232EBF2173677F88E3EFA5C479B49` (Verified 100% byte-identical).
+- Production threshold remains locked at `0.35`. Canonical 10-feature schema remains unmodified.
+- Zero model retraining or parameter refitting executed; `test_phase8_benchmarking.py:test_9` was intentionally excluded to prevent benchmark artifact overwriting.
+
+### 4. NEXT STEP
+- **Phase 9.5 — Pull Request Explorer UI** (or Phase 10 Productionization): Extend the Developer Dashboard to support multi-commit PR analysis and review workflows.
+
+---
+
+## Phase 9.3 Optional Qualitative LLM Analysis UI Implementation & Verification
+
+Completed Phase 9.3 (Optional Qualitative LLM Analysis UI), extending `src/ui/app.py` with an additive qualitative code-change explanation layer that reuses PatchGuard's existing analysis engine, providers, evidence validation, and formatting helpers.
+
+### 1. IMPLEMENTED COMPONENTS & DESIGN DECISIONS
+- `src/ui/app.py`: Implemented Section E ("Qualitative LLM Analysis") below the primary ML prediction results:
+  1. **Strictly Additive & Optional Architecture**: ML prediction remains the primary result. Qualitative LLM analysis is never executed on initial page load, nor on clicking "Analyze Commit", nor on input edit. Execution requires an explicit user click on the "Generate Qualitative Analysis" button (`key="run_llm_button"`).
+  2. **Provider Selection & Safety**:
+     - `llm_provider_select`: Selectbox offering `mock` (default) and `openai`.
+     - `MockLLMProvider`: Runs completely offline, without API keys, dependencies, or external network requests.
+     - `OpenAIProvider`: Configurable model name (default: `gpt-4o-mini`). Requires `OPENAI_API_KEY` set in the environment. Clear security disclosure notice displayed when external provider is selected.
+     - Zero secret storage: No API keys are accepted into or stored within `st.session_state`, URLs, logs, or exception messages.
+  3. **Reusing Existing Analysis Engine**:
+     - Uses `LLMCodeAnalyzer(provider=provider)` from `src/analysis/analyzer.py`.
+     - Reuses the existing `PredictionResult` for the currently selected commit via `analyzer.analyze_repo_commit(repo_path, commit_ref, prediction_result=result)`.
+     - Diff extraction, context budgeting, parsing, and evidence validation against commit hunks run through the established Phase 6 pipeline without duplicate logic.
+  4. **Grounding & Evidence Display**:
+     - Uses `format_risk_factor_display` from `src/ui/helpers.py`.
+     - Formats qualitative findings with review priorities (`[HIGH]`, `[MEDIUM]`, `[LOW]`), category, description, file location, and code snippet.
+     - Explicit verification badges: `[Verified Grounding]` (verified against commit diff hunks) vs `[Ungrounded Citation]` (unverified model assertions). Never labels unverified evidence as grounded.
+     - Renders commit summary, key changes, affected areas, testing observations, and recommended review actions.
+  5. **Resilient Error Isolation & State Management**:
+     - Independent session state variables: `last_llm_analysis` and `last_llm_error`.
+     - Provider errors (`MissingAPIKeyError`, `OpenAIProviderError`, etc.) display clear sanitized alerts with actionable remediation via `format_error_message(exc)` without clearing or corrupting the valid ML prediction.
+     - Never silently falls back from OpenAI to mock.
+     - Changing the target repository path or commit reference immediately invalidates both previous ML metrics and qualitative LLM analysis results.
+
+### 2. VERIFICATION & HEADLESS TESTING RESULTS
+- Extended `tests/test_dashboard.py` with `TestQualitativeLLMAnalysisUI` (9 automated headless integration tests):
+  1. `test_initial_render_does_not_invoke_llm`: Verifies initial render does not show LLM controls or run LLM analysis.
+  2. `test_ml_prediction_available_when_qualitative_analysis_disabled`: Verifies ML prediction functions independently without running LLM analysis.
+  3. `test_explicit_mock_analysis_uses_mock_provider`: Verifies explicit click runs mock analysis, rendering summary, factors, grounding, and actions while keeping ML metrics intact.
+  4. `test_mock_analysis_requires_no_api_key_or_network`: Verifies mock analysis succeeds with zero API credentials in environment.
+  5. `test_grounded_evidence_display_with_matching_diff`: Verifies that citations matching the commit diff hunks are marked with `[Verified Grounding]`.
+  6. `test_provider_failure_displays_sanitized_error_preserves_ml_prediction`: Verifies that an OpenAI failure (missing key) displays a sanitized error while keeping ML prediction metrics and tables intact.
+  7. `test_changing_inputs_invalidates_stale_results`: Verifies that modifying the commit reference invalidates both ML metrics and qualitative findings.
+  8. `test_openai_missing_config_does_not_silently_run_mock`: Verifies that an unconfigured OpenAI request does not silently fall back to mock.
+  9. `test_no_stale_analysis_shown_after_failed_analysis_request`: Verifies that a subsequent failed analysis request purges prior qualitative results.
+- Test Suite Execution:
+  - `python -m unittest tests/test_dashboard.py`: **48/48 tests passed** in 42.614s (32 helper unit tests + 7 Commit Risk Inspector tests + 9 Qualitative LLM Analysis tests).
+  - Full safe regression suite: **99/99 tests passed** in 116.532s (`test_dashboard.py`, `test_prediction_engine.py`, `test_analysis_schema.py`, `test_openai_provider.py`, `test_cli.py`, `test_pr_analyzer.py`).
+  - Standard discovery count: **212 unit tests** across 12 test modules.
+
+### 3. PRODUCTION ARTIFACT PRESERVATION
+- `models/logistic_regression_real.pkl`: SHA-256 `A32B30DFF63B3A85C3FD9D9983921D5F5C5C5629ACC9C206F77759C46F60F387` (Verified 100% byte-identical).
+- `models/real_data_scaler.pkl`: SHA-256 `C8E65F768DAB97ACF8DF573DA60F6B1C0E9232EBF2173677F88E3EFA5C479B49` (Verified 100% byte-identical).
+- Production threshold remains locked at `0.35`. Canonical 10-feature schema remains unmodified.
+
+### 4. NEXT STEP
+- **Phase 9.4 — Pull Request Explorer / Benchmark Viewer** (or Phase 10 Productionization): Extend the Developer Dashboard to support multi-commit PR analysis or benchmark model comparisons.
+
+---
+
+## Phase 9.2 Commit Risk Inspector UI Implementation & Verification
+
+Completed Phase 9.2 (Commit Risk Inspector UI), implementing the interactive Streamlit application entry point in `src/ui/app.py` for analyzing individual commits in local Git repositories with real-time risk scoring, mathematical model signals visualization, canonical feature tables, provenance audit data, and resilient domain exception handling.
+
+### 1. IMPLEMENTED COMPONENTS & DESIGN DECISIONS
+- `src/ui/app.py`: Implemented the full Commit Risk Inspector Streamlit application:
+  1. **Page Configuration & Header**: Configured page with wide layout and title "PatchGuard | Developer Dashboard", displaying clear offline/local-only execution boundaries and purpose.
+  2. **Sidebar Controls & Cache**:
+     - Local repository path text input (pre-populated with repository root).
+     - Commit SHA or Git reference text input (pre-populated with `HEAD`).
+     - Explicit "Analyze Commit" button (`key="analyze_button"`). Analysis never runs automatically on input edit; execution requires explicit user trigger.
+     - `@st.cache_resource def get_prediction_engine()` ensures the production `RiskPredictionEngine` (and underlying `logistic_regression_real.pkl` + `real_data_scaler.pkl`) is loaded as an efficient singleton.
+  3. **Prediction Execution & Stale State Clearance**:
+     - When analysis is triggered, any stale prediction results or error states are cleared from `st.session_state` before invocation.
+     - On exception (`PatchGuardError`, `GitExtractorError`, `ValueError`, etc.), the error is formatted via `format_error_message`, stored in session state, and displayed with suggested remediation; no stale metric or chart data is retained.
+  4. **Risk Summary Presentation**:
+     - Four top-level metric cards: Estimated Risk Score ($P(\text{defect})$), Production Decision Threshold (`0.35` locked), Risk Classification (`Defect-Prone Change` vs `Standard Risk Change`), and Presentation Risk Level badge (`LOW`, `MEDIUM`, `HIGH`).
+     - Includes prominent scientific disclaimer noting probabilities are estimated risk scores rather than calibrated real-world defect frequencies.
+  5. **Model Signals Visualization**:
+     - Uses Altair horizontal bar chart to render log-odds contributions ($C_i = \beta_i \cdot z_i$) formatted via `prepare_signals_chart_data`.
+     - Distinct visual encodings for positive factors (increasing risk) and negative factors (decreasing risk).
+     - Includes non-causal disclaimer emphasizing that statistical associations do not imply causation.
+  6. **Commit Features Tabular View**:
+     - Renders canonical 10-feature dataset via `format_features_dataframe` into an interactive `st.dataframe`.
+  7. **Model Provenance Card**:
+     - Expandable provenance accordion detailing Model ID (`logistic_regression_real`), Model Version (`v1.0.0-phase4`), Feature Schema Version (`v1.0-10features`), Decision Threshold (`0.35`), Prediction Timestamp, Model SHA-256 Hash, and Scaler SHA-256 Hash.
+- **Dependency & Compatibility Considerations**:
+  - Replaced deprecated `use_container_width=True` on buttons, charts, and dataframes to maintain forward compatibility with modern Streamlit versions (1.35.0 through 1.65.0+).
+  - Maintained zero changes to production models, prediction schemas, or existing CLI workflows.
+
+### 2. VERIFICATION & HEADLESS TESTING RESULTS
+- Extended `tests/test_dashboard.py` with 7 automated headless integration tests using `streamlit.testing.v1.AppTest`:
+  1. `test_app_initial_render`: Validates that on startup, page renders title, sidebar inputs, default repository path, default `HEAD` ref, and renders zero premature metric cards or tables before the user clicks analyze.
+  2. `test_app_successful_analysis_temporary_repo`: Validates end-to-end execution on a temporary Git repository fixture; verifies 4 metrics are populated, decision threshold is locked at `0.35`, feature dataframe contains all 10 features, and model provenance card expands with verified SHA-256 hashes.
+  3. `test_app_invalid_repository_path`: Validates that entering an invalid path displays a "Repository Not Found" error alert with appropriate remediation.
+  4. `test_app_missing_commit_hash`: Validates that entering a non-existent commit SHA renders a "Commit Not Found" error alert.
+  5. `test_app_unsupported_merge_commit`: Creates an actual merge commit in a temporary Git fixture and asserts that analyzing it triggers the domain "Unsupported Commit Type" error alert.
+  6. `test_app_empty_commit`: Creates an empty commit (`--allow-empty`) and asserts that analyzing it triggers the domain "Empty Commit" error alert.
+  7. `test_app_failure_state_clears_stale_results`: Tests sequential runs: first a successful commit analysis, followed by an invalid commit input. Asserts that the second run clears prior prediction metrics and displays only the error alert.
+- Test Suite Execution:
+  - `python -m unittest tests/test_dashboard.py`: **39/39 tests passed** in 23.165s (32 pure helper tests + 7 AppTest headless UI tests).
+  - Full safe regression suite: **90/90 tests passed** in 113.121s (`test_dashboard.py`, `test_prediction_engine.py`, `test_analysis_schema.py`, `test_openai_provider.py`, `test_cli.py`, `test_pr_analyzer.py`).
+  - Standard discovery count: **203 unit tests** across 12 test modules.
+
+### 3. PRODUCTION ARTIFACT PRESERVATION
+- `models/logistic_regression_real.pkl`: SHA-256 `A32B30DFF63B3A85C3FD9D9983921D5F5C5C5629ACC9C206F77759C46F60F387` (Verified 100% byte-identical).
+- `models/real_data_scaler.pkl`: SHA-256 `C8E65F768DAB97ACF8DF573DA60F6B1C0E9232EBF2173677F88E3EFA5C479B49` (Verified 100% byte-identical).
+- Production threshold remains locked at `0.35`. Canonical 10-feature schema remains unmodified.
+
+### 4. NEXT STEP
+- **Phase 9.3 — Optional Qualitative LLM Analysis UI**: Integrate optional qualitative LLM code-change analysis controls into the Commit Risk Inspector UI, allowing users to select providers (`mock` or `openai`), input models/API keys, view grounding verification status, and display structured risk factors and review actions.
+
+---
+
+## Phase 9.1 UI Scaffold & Pure-Python Helpers Implementation & Verification
+
+Completed Phase 9.1 (UI Scaffold & Pure-Python Helpers), establishing the foundational presentation and data-transformation layer for the PatchGuard Developer Dashboard without introducing Streamlit runtime dependencies or risking production artifact integrity.
+
+### 1. IMPLEMENTED COMPONENTS & DESIGN DECISIONS
+- `requirements.txt`: Added `streamlit>=1.35.0` while preserving all existing dependencies and version bounds.
+- `src/ui/__init__.py`: Created UI package root exporting the 5 pure helpers and package version (`1.0.0`).
+- `src/ui/helpers.py`: Implemented 5 pure-Python helper functions:
+  1. `prepare_signals_chart_data(model_signals)`: Converts `ModelSignals` (log-odds contributions $\beta_i \cdot z_i$) into chart-ready records. Preserves exact feature names, numeric values, and distinguishes positive drivers (increasing risk) from negative drivers (decreasing risk). Sorts by absolute magnitude descending.
+  2. `format_features_dataframe(features)`: Formats the 10 commit-time features into an ordered tabular structure enforcing the exact canonical schema order (`lines_added` through `num_source_files_changed`). Represents missing features as `None` (never silently inventing 0) and preserves unexpected keys at the end.
+  3. `get_risk_level_badge(risk_level, is_above_threshold)`: Translates risk levels (`LOW`, `MEDIUM`, `HIGH`) and threshold status ($p \ge 0.35$) into presentation metadata (label, color, icon, threshold status, and scientific disclaimer). Never alters ML classification or threshold logic.
+  4. `format_error_message(exception)`: Maps domain exceptions (`RepositoryNotFoundError`, `InvalidGitRepositoryError`, `CommitNotFoundError`, `UnsupportedCommitTypeError`, `EmptyCommitError`, `ModelArtifactNotFoundError`, `MissingAPIKeyError`, etc.) to clear user-facing titles, explanations, and remediation steps. Sanitizes Authorization headers and tokens.
+  5. `format_risk_factor_display(risk_factor)`: Formats qualitative `RiskFactor` observations. Derives grounding strictly from `evidence_verified`, ensuring ungrounded citations are never marked as verified.
+- **Architectural Isolation**: `src/ui/helpers.py` contains **zero Streamlit imports** and zero LLM dependencies, ensuring 100% testability with standard `unittest` and zero performance overhead.
+
+### 2. VERIFICATION & TEST RESULTS
+- Created comprehensive test suite `tests/test_dashboard.py` containing **32 unit tests**:
+  - `TestPrepareSignalsChartData` (5 tests): full signals, empty/None signals, fallback to top factors, dict input support, and type validation.
+  - `TestFormatFeaturesDataframe` (4 tests): exact canonical schema and order, missing features as None, extra key preservation, and type validation.
+  - `TestGetRiskLevelBadge` (6 tests): LOW below threshold, MEDIUM above threshold, HIGH above threshold, case normalization, unknown/None risk levels, and disclaimer verification.
+  - `TestFormatErrorMessage` (12 tests): repo errors, commit errors, merge commits, empty commits, artifact errors, schema errors, provider errors, GitHub errors, secret sanitization, and generic fallback.
+  - `TestFormatRiskFactorDisplay` (5 tests): verified evidence, unverified evidence, dict input support, invalid review priority, and type validation.
+- Test execution: **32/32 tests passed** in 0.008s (`python -m unittest tests/test_dashboard.py`).
+- Safe regression suite: **83/83 tests passed** in 71.329s covering `test_dashboard.py`, `test_prediction_engine.py`, `test_analysis_schema.py`, `test_openai_provider.py`, `test_cli.py`, and `test_pr_analyzer.py`.
+
+### 3. PRODUCTION ARTIFACT PRESERVATION
+- `models/logistic_regression_real.pkl`: SHA-256 `A32B30DFF63B3A85C3FD9D9983921D5F5C5C5629ACC9C206F77759C46F60F387` (Verified 100% identical before and after).
+- `models/real_data_scaler.pkl`: SHA-256 `C8E65F768DAB97ACF8DF573DA60F6B1C0E9232EBF2173677F88E3EFA5C479B49` (Verified 100% identical before and after).
+- Production threshold remains locked at `0.35`. Canonical 10-feature schema remains unmodified.
+
+### 4. TEST SUITE RECONCILIATION NOTE
+- Discovered unit test count prior to Phase 9.1: **164 test cases** across 11 test modules.
+- New unit tests added in Phase 9.1: **+32 test cases** in `tests/test_dashboard.py`.
+- Current discovered unit test count: **196 test cases** across 12 test modules.
+- Historical note: The Phase 8 handoff documented 170 tests due to an inherited +6 count originating in Phase 7.1 (`tests/test_pr_analyzer.py` has 11 tests, but was recorded as 17).
+
+### 5. NEXT STEP
+- **Phase 9.2 — Commit Risk Inspector UI (`src/ui/app.py`)**: Implement the interactive Streamlit application entry point rendering commit inputs, prediction cards, log-odds charts, 10-feature tables, and optional qualitative analysis.
 
 ---
 

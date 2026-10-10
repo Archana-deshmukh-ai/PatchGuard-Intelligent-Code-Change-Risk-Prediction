@@ -1,0 +1,38 @@
+# Version control
+.git
+.gitignore
+.gitattributes
+
+# Python bytecode and caches
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+ENV/
+
+# Development, tests, and temporary artifacts
+tests/
+scratch/
+notebooks/
+data/
+*.log
+.coverage
+htmlcov/
+.pytest_cache/
+.mypy_cache/
+
+# Agent and IDE state
+.gemini/
+.system_generated/
+.idea/
+.vscode/
+
+# Environment files and credentials
+*.pem
+*.key
+.env
+.env.*
