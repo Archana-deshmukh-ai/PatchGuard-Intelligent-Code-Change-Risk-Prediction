@@ -6,27 +6,23 @@
 The long-term goal of PatchGuard is to build a real-world software engineering bug-risk prediction system. The final architecture will analyze code changes (Git commits / Pull Requests), predict bug probability using Machine Learning, provide LLM-driven risk explanations, leverage RAG over repository documentation/issues/PR history, and integrate into developer CI/CD workflows to give actionable recommendations.
 
 ## Current Stage
-**Phase 10.3 Complete — Docker Containerization Designed, Implemented, and Documented**
+**Phase 10.4 Complete — CI/CD & Deployment Readiness Implemented and Configured**
 
 
 ### Handoff Guide for Future AI / Developer Sessions
 > [!IMPORTANT]
-> **Phase 10.3 (Docker Containerization & Verification) is COMPLETE and CHECKPOINTED**.
+> **Phase 10.4 (CI/CD & Deployment Readiness) is COMPLETE and CHECKPOINTED**.
 >
 > When resuming development in a future session:
-> 1. First inspect [`README.md`](file:///c:/Projects/CODE_project/bug-prediction/README.md), [`PROJECT_LOG.md`](file:///c:/Projects/CODE_project/bug-prediction/PROJECT_LOG.md), [`Dockerfile`](file:///c:/Projects/CODE_project/bug-prediction/Dockerfile), [`docker-compose.yml`](file:///c:/Projects/CODE_project/bug-prediction/docker-compose.yml), `git status`, and `git log`.
-> 2. Understand that Phase 10.3 implements multi-stage Docker containerization for PatchGuard:
->    - Base image: `python:3.12-slim-bookworm` with explicit dependency layer caching.
->    - Non-root user: `patchguard` (UID/GID `10001`). Zero root daemon privileges.
->    - System utilities: `git` (required for commit feature mining and diff extraction) and `curl` (for health checks).
->    - Safe volume mounting: Host repositories mounted to `/repositories:ro` (read-only for inference integrity).
->    - Built-in `HEALTHCHECK`: Queries `http://localhost:8000/health` every 30 seconds.
->    - Dual entrypoint support: Default runs FastAPI REST API (`uvicorn src.api.app:app --host 0.0.0.0 --port 8000`); command override allows running Streamlit dashboard (`streamlit run src/ui/app.py`).
->    - Note on host environment: Docker CLI is not installed in the local Windows development environment (`CommandNotFoundException`); full static validation was performed and exact commands for build, run, and compose are documented.
-> 3. The REST API (`src/api/`) and Developer Dashboard (`src/ui/`) remain complete, tested, and operational.
+> 1. First inspect [`README.md`](file:///c:/Projects/CODE_project/bug-prediction/README.md), [`PROJECT_LOG.md`](file:///c:/Projects/CODE_project/bug-prediction/PROJECT_LOG.md), [`.github/workflows/ci.yml`](file:///c:/Projects/CODE_project/bug-prediction/.github/workflows/ci.yml), `git status`, and `git log`.
+> 2. Understand that Phase 10.4 implements an automated, production-grade GitHub Actions CI workflow:
+>    - Workflow file: `.github/workflows/ci.yml`.
+>    - Job 1 (`quality-and-security`): Enforces git whitespace formatting (`git diff --check`), immutable model/scaler SHA-256 hash invariance, and automated secret scanning.
+>    - Job 2 (`python-tests`): Executes the approved 12-module Python regression suite (248 unit tests) in Python 3.12, strictly withholding `tests.test_phase8_benchmarking` to protect benchmark artifacts from regeneration.
+>    - Job 3 (`docker-verification`): Builds the multi-stage `Dockerfile` on native Linux runners, launches an ephemeral container on `127.0.0.1:8000`, verifies `/health` and `/ready`, runs authenticated commit defect risk prediction against an isolated Git test repository, and performs automated resource teardown.
+> 3. Security posture: The CI workflow operates under least-privilege `permissions: contents: read`. No deployment credentials or external API keys are required for test execution.
 > 4. The production model artifacts (`models/logistic_regression_real.pkl` and `models/real_data_scaler.pkl`) and Phase 5 prediction behavior remain 100% preserved and untouched (SHA-256 verified).
-> 5. Active test suite status: standard discovery finds **258 unit tests** across 13 test modules. All 248 non-benchmark tests pass 100% offline with zero failures and zero errors. The 10 tests in `tests/test_phase8_benchmarking.py` remain safely withheld from automated regression runs to protect benchmark artifacts from regeneration.
-> 6. The authorized next implementation step upon review is **Phase 10.4 — CI/CD & Deployment Readiness**.
+> 5. Active test suite status: 258 total tests discovered across 13 test modules; 248 non-benchmark unit tests pass 100% offline with zero failures and zero errors.
 >
 > **Long-Term Roadmap**:
 > 1. Project & ML Foundation — **COMPLETE**
@@ -43,8 +39,40 @@ The long-term goal of PatchGuard is to build a real-world software engineering b
 > 12. Developer Dashboard (Phase 9: 9.1–9.5) — **COMPLETE**
 > 13. Productionization: Architecture Inspection & Design (Phase 10.1) — **COMPLETE**
 > 14. Productionization: REST API & Automated Tests (Phase 10.2) — **COMPLETE**
-> 15. **Productionization: Docker Containerization & Verification (Phase 10.3) — COMPLETE & HARDENED**
-> 16. Productionization: CI/CD & Deployment Readiness (Phase 10.4)
+> 15. Productionization: Docker Containerization & Verification (Phase 10.3) — **COMPLETE & HARDENED**
+> 16. **Productionization: CI/CD & Deployment Readiness (Phase 10.4) — COMPLETE**
+>
+>
+> ---
+>
+> ## Phase 10.4 CI/CD & Deployment Readiness
+>
+> Completed Phase 10.4 (CI/CD & Deployment Readiness), authoring and validating an automated GitHub Actions CI workflow (`.github/workflows/ci.yml`) to enforce automated code quality, ML artifact integrity, regression testing, and container health verification on every push and pull request to `main`.
+>
+> ### 1. IMPLEMENTED WORKFLOW JOBS & DESIGN DECISIONS
+> - **Default Security Permissions**: Configured least-privilege `permissions: contents: read`. Read-only default prevents unintended repository mutation.
+> - **Job 1: `quality-and-security`**:
+>   - Uses `actions/checkout@v4` with `fetch-depth: 2` and executes `git diff --check` on `HEAD~1 HEAD` (with fallback to working tree check) to guarantee zero trailing whitespace or line formatting anomalies.
+>   - Compares SHA-256 hashes of `models/logistic_regression_real.pkl` and `models/real_data_scaler.pkl` against locked constants, failing fast if model weights or scalers are mutated.
+>   - Executes an automated regex secret scanner checking Python, YAML, Markdown, and JSON files for private keys, GitHub tokens, and OpenAI API keys while exempting offline test fixture placeholders.
+> - **Job 2: `python-tests`**:
+>   - Uses `ubuntu-latest` with `actions/setup-python@v5` pinned to Python 3.12 and pip dependency caching.
+>   - Installs dependencies from `requirements.txt`.
+>   - Explicitly loads and runs all 12 approved non-benchmark unit test modules (248 tests verified: `tests.test_analysis_pipeline`=24, `tests.test_analysis_schema`=11, `tests.test_api`=17, `tests.test_cli`=9, `tests.test_dashboard`=77, `tests.test_diff_extractor`=17, `tests.test_github_integration`=23, `tests.test_github_workflow`=16, `tests.test_openai_provider`=8, `tests.test_pr_analyzer`=11, `tests.test_prediction_engine`=12, `tests.test_repository_acquisition`=23).
+>   - Excludes `tests.test_phase8_benchmarking` to strictly prevent benchmark artifact regeneration.
+>   - Re-verifies model and scaler SHA-256 hashes post-test to confirm zero runtime modification.
+> - **Job 3: `docker-verification`**:
+>   - Builds multi-stage `Dockerfile` (`patchguard:ci-test`).
+>   - Creates an ephemeral Git test repository in `/tmp/ci-repos/sample-repo` with world-readable permissions (`chmod -R a+rX`).
+>   - Launches container bound to `127.0.0.1:8000:8000` with an ephemeral CI API key.
+>   - Probes `GET /health` with bounded retry loop until responsive (`HTTP 200 pass`), dumping container logs on timeout.
+>   - Probes `GET /ready` verifying loaded model ID, threshold 0.35, and artifact hashes (`HTTP 200 ready`).
+>   - Executes authenticated `POST /v1/predictions/commit` with `X-API-Key` and verified request payload (`repository`, `commit_hash`), verifying model inference and log-odds contributions via whitespace-tolerant regex matching.
+>   - Captures container logs and ensures container and fixture teardown with `if: always()`.
+>
+> ### 2. DOCUMENTATION & LOCAL REPRODUCTION
+> - Added CI status badge and Section 10 to `README.md` detailing automated CI gates and local reproduction commands.
+> - Emphasized that CI validation verifies test harness and container startup health in an isolated runner, remaining distinct from live production cluster deployment.
 >
 >
 > ---

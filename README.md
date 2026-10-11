@@ -1,5 +1,7 @@
 # PatchGuard: Intelligent Code Change Risk Prediction
 
+[![PatchGuard CI](https://github.com/Archana-deshmukh-ai/PatchGuard-Intelligent-Code-Change-Risk-Prediction/actions/workflows/ci.yml/badge.svg)](https://github.com/Archana-deshmukh-ai/PatchGuard-Intelligent-Code-Change-Risk-Prediction/actions/workflows/ci.yml)
+
 Predicting defect-inducing code changes using machine learning, Git repository mining, SZZ defect labeling, code churn analysis, and contextual intelligence.
 
 ---
@@ -287,7 +289,51 @@ PatchGuard is packaged as a reproducible, multi-stage Docker container (`Dockerf
 
 ---
 
-## 10. Current Limitations & Key Learnings
+---
+
+## 10. Continuous Integration & Deployment Readiness (Phase 10.4)
+
+PatchGuard includes an automated GitHub Actions CI workflow (`.github/workflows/ci.yml`) to enforce code quality, artifact integrity, and container health on every push and pull request to `main`:
+
+* **Default Security Permissions**: The workflow operates under strict least-privilege permissions (`permissions: contents: read`). No privileged secrets or external API credentials are required for execution.
+* **Three Automated Pipeline Gates**:
+  1. **Quality & Security (`quality-and-security`)**:
+     - Enforces clean Git whitespace formatting (`git diff --check`).
+     - Verifies immutable SHA-256 hashes of production model and scaler artifacts.
+     - Runs automated secret scanning to prevent credential leaks.
+  2. **Python Regression Suite (`python-tests`)**:
+     - Installs dependencies in Python 3.12 runner.
+     - Executes all 12 approved non-benchmark unit test modules (248 tests).
+     - Strictly excludes Phase 8 benchmark runner (`tests.test_phase8_benchmarking`) to safeguard benchmark results from unintended regeneration.
+     - Confirms zero model artifact mutation post-test execution.
+  3. **Docker Build & Runtime Verification (`docker-verification`)**:
+     - Builds multi-stage `Dockerfile` on native Linux runner.
+     - Starts container with ephemeral CI API key bound locally to `127.0.0.1:8000`.
+     - Validates process liveness probe (`GET /health`).
+     - Validates model and scaler readiness probe (`GET /ready`).
+     - Executes authenticated commit defect risk prediction (`POST /v1/predictions/commit`) against a temporary Git test repository.
+     - Tears down and cleans up container and test workspace resources.
+
+* **Local Reproduction Commands**:
+  ```bash
+  # 1. Run local regression test suite (12 non-benchmark modules)
+  python -c "import unittest; modules = ['tests.test_analysis_pipeline', 'tests.test_analysis_schema', 'tests.test_api', 'tests.test_cli', 'tests.test_dashboard', 'tests.test_diff_extractor', 'tests.test_github_integration', 'tests.test_github_workflow', 'tests.test_openai_provider', 'tests.test_pr_analyzer', 'tests.test_prediction_engine', 'tests.test_repository_acquisition']; suite = unittest.TestSuite(); [suite.addTests(unittest.defaultTestLoader.loadTestsFromName(m)) for m in modules]; runner = unittest.TextTestRunner(verbosity=2); runner.run(suite)"
+
+  # 2. Verify git whitespace
+  git diff --check
+
+  # 3. Verify production artifact hashes
+  # Windows PowerShell:
+  Get-FileHash models/logistic_regression_real.pkl, models/real_data_scaler.pkl -Algorithm SHA256
+  # Linux / macOS:
+  sha256sum models/logistic_regression_real.pkl models/real_data_scaler.pkl
+  ```
+
+* **Deployment Boundary Notice**: CI validation proves automated build, test, and container startup health in an isolated runner. It does not perform automated deployment or manage live production cluster state.
+
+---
+
+## 11. Current Limitations & Key Learnings
 
 1. **Shallow Feature Representation**: Commit-level diff metrics capture commit size and dispersion, but do not capture deep AST structure or semantic code logic.
 2. **Detection of Small Patches**: Small, single-file bug fixes produce small diff footprints, making them harder for churn metrics alone to detect (leading to False Negatives).
@@ -298,10 +344,9 @@ PatchGuard is packaged as a reproducible, multi-stage Docker container (`Dockerf
 7. **External Fork PR Acquisition**: Pull requests originating from external repository forks where head commit SHAs are not present in the base repository require fetching from fork remotes; cross-repository fork PR acquisition is currently unsupported in Phase 7.3.
 8. **Local API Security Boundary**: The Phase 10.2 REST API operates in a local-development boundary anchored to `127.0.0.1` and `PATCHGUARD_REPOS_ROOT`. It enforces repository allowlisting, suppresses internal paths, rejects client-supplied threshold overrides, and is not designed for public unauthenticated exposure.
 
-
 ---
 
-## 11. Project Roadmap
+## 12. Project Roadmap
 
 - [x] **Phase 1: Project & ML Foundation** — Supervised binary classification framing, synthetic pipeline verification, baseline evaluation metrics.
 - [x] **Phase 2: Real Git Repository Mining** — Subprocess-based `GitRepositoryExtractor` parsing 10 commit-time diff features across Git history.
@@ -317,4 +362,4 @@ PatchGuard is packaged as a reproducible, multi-stage Docker container (`Dockerf
 - [x] **Phase 9: Developer Dashboard** — Interactive Streamlit UI for commit risk monitoring, audit reports, qualitative LLM analysis, read-only ML benchmark comparison, and Pull Request exploration (Phases 9.1–9.5 complete).
 - [x] **Phase 10.2: REST API & Automated Tests** — FastAPI service, Pydantic v2 schemas, endpoints (/health, /ready, /v1/predictions/commit), API key auth, repository allowlisting, locked 0.35 threshold.
 - [x] **Phase 10.3: Docker Containerization & Verification** — Multi-stage Dockerfile (python:3.12-slim), non-root user (10001), Git CLI, health check, volume-mount design, docker-compose.yml.
-- [ ] **Phase 10.4: CI/CD & Deployment Readiness** — Automated GitHub Actions CI workflow, security auditing, and production release.
+- [x] **Phase 10.4: CI/CD & Deployment Readiness** — Automated GitHub Actions CI workflow (`.github/workflows/ci.yml`), automated testing gates, and deployment readiness.

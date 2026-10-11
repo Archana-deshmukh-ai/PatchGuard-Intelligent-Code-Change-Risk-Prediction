@@ -1,0 +1,234 @@
+name: PatchGuard CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality-and-security:
+    name: Code Quality & Security Checks
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Check git formatting and whitespace
+        run: |
+          if git rev-parse --verify HEAD~1 >/dev/null 2>&1; then
+            git diff --check HEAD~1 HEAD
+          else
+            git diff --check
+          fi
+
+      - name: Verify immutable model artifact hashes
+        run: |
+          EXPECTED_MODEL="a32b30dff63b3a85c3fd9d9983921d5f5c5c5629acc9c206f77759c46f60f387"
+          EXPECTED_SCALER="c8e65f768dab97acf8df573da60f6b1c0e9232ebf2173677f88e3efa5c479b49"
+
+          MODEL_HASH=$(sha256sum models/logistic_regression_real.pkl | awk '{print $1}')
+          SCALER_HASH=$(sha256sum models/real_data_scaler.pkl | awk '{print $1}')
+
+          if [ "$MODEL_HASH" != "$EXPECTED_MODEL" ]; then
+            echo "Model artifact hash mismatch! Expected: $EXPECTED_MODEL, Got: $MODEL_HASH"
+            exit 1
+          fi
+
+          if [ "$SCALER_HASH" != "$EXPECTED_SCALER" ]; then
+            echo "Scaler artifact hash mismatch! Expected: $EXPECTED_SCALER, Got: $SCALER_HASH"
+            exit 1
+          fi
+
+          echo "Model and scaler artifact hashes verified 100% byte-identical."
+
+      - name: Safe secret scan
+        run: |
+          echo "Scanning for accidental committed secret patterns..."
+          python -c "
+          import os, re, sys
+          PATTERNS = [
+              re.compile(r'ghp_[a-zA-Z0-9]{36}'),
+              re.compile(r'github_pat_[a-zA-Z0-9_]{82}'),
+              re.compile(r'sk-[a-zA-Z0-9]{20,}'),
+              re.compile(r'-----BEGIN (?:RSA |EC |OPENSSH |)PRIVATE KEY-----')
+          ]
+          findings = []
+          for root, dirs, files in os.walk('.'):
+              if any(p in root for p in ['.git', '__pycache__', '.venv', 'venv']):
+                  continue
+              for f in files:
+                  if f.endswith(('.py', '.md', '.txt', '.json', '.yml', '.yaml', 'Dockerfile')):
+                      p = os.path.join(root, f)
+                      with open(p, 'r', errors='ignore') as fp:
+                          content = fp.read()
+                      for idx, line in enumerate(content.splitlines(), 1):
+                          if any(pat.search(line) for pat in PATTERNS):
+                              if not ('[FAKE_PRIVATE_KEY_FOR_OFFLINE_TESTING]' in content and 'PRIVATE KEY' in line):
+                                  findings.append((p, idx))
+          if findings:
+              print(f'FAILED: Potential credentials detected in {len(findings)} location(s):')
+              for path, line_no in findings:
+                  print(f'  - {path}:{line_no}')
+              sys.exit(1)
+          print('PASS: Zero credentials detected in repository.')
+          "
+
+  python-tests:
+    name: Python Regression Tests
+    runs-on: ubuntu-latest
+    needs: quality-and-security
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run approved non-benchmark regression suite
+        run: |
+          python -c "
+          import unittest, sys
+          modules = [
+              'tests.test_analysis_pipeline',
+              'tests.test_analysis_schema',
+              'tests.test_api',
+              'tests.test_cli',
+              'tests.test_dashboard',
+              'tests.test_diff_extractor',
+              'tests.test_github_integration',
+              'tests.test_github_workflow',
+              'tests.test_openai_provider',
+              'tests.test_pr_analyzer',
+              'tests.test_prediction_engine',
+              'tests.test_repository_acquisition'
+          ]
+          loader = unittest.defaultTestLoader
+          suite = unittest.TestSuite()
+          for m in modules:
+              suite.addTests(loader.loadTestsFromName(m))
+          print(f'Running {suite.countTestCases()} approved non-benchmark unit tests...')
+          runner = unittest.TextTestRunner(verbosity=2)
+          result = runner.run(suite)
+          print(f'SUMMARY: testsRun={result.testsRun}, failures={len(result.failures)}, errors={len(result.errors)}, skipped={len(result.skipped)}')
+          sys.exit(0 if result.wasSuccessful() else 1)
+          "
+
+      - name: Verify zero model artifact mutation post-test
+        run: |
+          EXPECTED_MODEL="a32b30dff63b3a85c3fd9d9983921d5f5c5c5629acc9c206f77759c46f60f387"
+          EXPECTED_SCALER="c8e65f768dab97acf8df573da60f6b1c0e9232ebf2173677f88e3efa5c479b49"
+
+          MODEL_HASH=$(sha256sum models/logistic_regression_real.pkl | awk '{print $1}')
+          SCALER_HASH=$(sha256sum models/real_data_scaler.pkl | awk '{print $1}')
+
+          if [ "$MODEL_HASH" != "$EXPECTED_MODEL" ] || [ "$SCALER_HASH" != "$EXPECTED_SCALER" ]; then
+            echo "Artifact mutation detected post-test execution!"
+            exit 1
+          fi
+          echo "Artifact invariance confirmed."
+
+  docker-verification:
+    name: Docker Build & Runtime Verification
+    runs-on: ubuntu-latest
+    needs: python-tests
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Build Docker image
+        run: |
+          docker build -t patchguard:ci-test .
+
+      - name: Create isolated Git test repository
+        run: |
+          mkdir -p /tmp/ci-repos/sample-repo
+          cd /tmp/ci-repos/sample-repo
+          git init -b main
+          git config user.name "CI Tester"
+          git config user.email "ci@example.com"
+          echo "def example(): return False" > app.py
+          git add app.py
+          git commit -m "Initial commit"
+          echo "def example(): return True" > app.py
+          git add app.py
+          git commit -m "Feature commit"
+          COMMIT_SHA=$(git rev-parse HEAD)
+          echo "CI_COMMIT_SHA=${COMMIT_SHA}" >> $GITHUB_ENV
+          cd -
+          chmod -R a+rX /tmp/ci-repos
+
+      - name: Launch container and verify runtime health
+        run: |
+          CI_KEY="ci-ephemeral-key-$(date +%s)"
+          echo "Starting container on 127.0.0.1:8000..."
+          docker run -d \
+            --name patchguard-container \
+            -p 127.0.0.1:8000:8000 \
+            -e PATCHGUARD_API_KEY="${CI_KEY}" \
+            -e PATCHGUARD_REPOS_ROOT="/repositories" \
+            -v /tmp/ci-repos:/repositories:ro \
+            patchguard:ci-test
+
+          echo "Waiting for container readiness probe..."
+          READY=0
+          for i in {1..30}; do
+            if curl -s -f http://127.0.0.1:8000/health > /dev/null 2>&1; then
+              echo "Health probe responsive after ${i}s"
+              READY=1
+              break
+            fi
+            sleep 1
+          done
+          if [ "$READY" -ne 1 ]; then
+            echo "Error: Container health probe failed to respond within 30s!"
+            docker logs patchguard-container
+            exit 1
+          fi
+
+          echo "1. Verify GET /health probe..."
+          HEALTH_RES=$(curl -s -f http://127.0.0.1:8000/health)
+          echo "Response: ${HEALTH_RES}"
+          echo "${HEALTH_RES}" | grep -q '"status":"pass"' || exit 1
+
+          echo "2. Verify GET /ready probe..."
+          READY_RES=$(curl -s -f http://127.0.0.1:8000/ready)
+          echo "Response: ${READY_RES}"
+          echo "${READY_RES}" | grep -q '"status":"ready"' || exit 1
+          echo "${READY_RES}" | grep -q 'a32b30dff63b3a85c3fd9d9983921d5f5c5c5629acc9c206f77759c46f60f387' || exit 1
+
+          echo "3. Verify POST /v1/predictions/commit (authenticated)..."
+          PRED_RES=$(curl -s -f -X POST http://127.0.0.1:8000/v1/predictions/commit \
+            -H "Content-Type: application/json" \
+            -H "X-API-Key: ${CI_KEY}" \
+            -d "{\"repository\": \"sample-repo\", \"commit_hash\": \"${CI_COMMIT_SHA}\"}")
+          echo "Response: ${PRED_RES}"
+          echo "${PRED_RES}" | grep -E -q '"decision_threshold"[[:space:]]*:[[:space:]]*0\.35' || exit 1
+          echo "${PRED_RES}" | grep -E -q '"model_id"[[:space:]]*:[[:space:]]*"logistic_regression_real"' || exit 1
+
+          echo "All runtime container verification checks passed successfully."
+
+      - name: Teardown container and test fixtures
+        if: always()
+        run: |
+          docker logs patchguard-container || true
+          docker stop patchguard-container || true
+          docker rm patchguard-container || true
+          rm -rf /tmp/ci-repos || true
