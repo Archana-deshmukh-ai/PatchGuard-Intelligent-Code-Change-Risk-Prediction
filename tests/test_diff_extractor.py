@@ -392,5 +392,43 @@ class TestGitDiffExtractor(unittest.TestCase):
         self.assertNotIn(self.temp_dir, fd.old_path)
         self.assertTrue(fd.new_path.startswith("sub/module.py"))
 
+    def test_18_safe_directory_arguments(self):
+        """18. Verify GitDiffExtractor and GitRepositoryExtractor pass repository-scoped safe.directory arguments."""
+        from src.git_extractor import GitRepositoryExtractor
+        from unittest.mock import patch
+
+        extractor = GitDiffExtractor(self.temp_dir)
+        clean_path = os.path.abspath(self.temp_dir).replace('\\', '/')
+        real_path = os.path.realpath(self.temp_dir).replace('\\', '/')
+
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
+            extractor._run_git(["rev-parse", "HEAD"])
+            self.assertTrue(mock_run.called)
+            cmd = mock_run.call_args[0][0]
+            self.assertEqual(cmd[1], "-c")
+            self.assertEqual(cmd[2], f"safe.directory={clean_path}")
+            if real_path != clean_path:
+                self.assertEqual(cmd[3], "-c")
+                self.assertEqual(cmd[4], f"safe.directory={real_path}")
+                self.assertEqual(cmd[5:], ["rev-parse", "HEAD"])
+            else:
+                self.assertEqual(cmd[3:], ["rev-parse", "HEAD"])
+
+        repo_ext = GitRepositoryExtractor(self.temp_dir)
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
+            repo_ext._run_git(["status"])
+            self.assertTrue(mock_run.called)
+            cmd = mock_run.call_args[0][0]
+            self.assertEqual(cmd[1], "-c")
+            self.assertEqual(cmd[2], f"safe.directory={clean_path}")
+            if real_path != clean_path:
+                self.assertEqual(cmd[3], "-c")
+                self.assertEqual(cmd[4], f"safe.directory={real_path}")
+                self.assertEqual(cmd[5:], ["status"])
+            else:
+                self.assertEqual(cmd[3:], ["status"])
+
 if __name__ == '__main__':
     unittest.main()

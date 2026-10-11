@@ -51,7 +51,12 @@ class PRAnalyzer:
 
     def _run_git(self, repo_path: str, args: List[str]) -> subprocess.CompletedProcess:
         git_executable = _find_git_executable()
-        cmd = [git_executable] + args
+        repo_clean = os.path.abspath(repo_path).replace('\\', '/')
+        repo_real = os.path.realpath(repo_path).replace('\\', '/')
+        safe_args = ["-c", f"safe.directory={repo_clean}"]
+        if repo_real != repo_clean:
+            safe_args += ["-c", f"safe.directory={repo_real}"]
+        cmd = [git_executable] + safe_args + args
         return subprocess.run(
             cmd,
             cwd=repo_path,

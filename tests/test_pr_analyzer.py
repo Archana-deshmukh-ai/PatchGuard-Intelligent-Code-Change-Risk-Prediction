@@ -298,6 +298,27 @@ class TestPRAnalyzer(unittest.TestCase):
         code_json = cli_main(args_json)
         self.assertEqual(code_json, 0)
 
+    def test_18_safe_directory_arguments(self):
+        """18. Verify PRAnalyzer._run_git passes repository-scoped safe.directory arguments."""
+        from unittest.mock import patch
+
+        clean_path = os.path.abspath(self.repo_path).replace('\\', '/')
+        real_path = os.path.realpath(self.repo_path).replace('\\', '/')
+
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
+            self.pr_analyzer._run_git(self.repo_path, ["status"])
+            self.assertTrue(mock_run.called)
+            cmd = mock_run.call_args[0][0]
+            self.assertEqual(cmd[1], "-c")
+            self.assertEqual(cmd[2], f"safe.directory={clean_path}")
+            if real_path != clean_path:
+                self.assertEqual(cmd[3], "-c")
+                self.assertEqual(cmd[4], f"safe.directory={real_path}")
+                self.assertEqual(cmd[5:], ["status"])
+            else:
+                self.assertEqual(cmd[3:], ["status"])
+
 
 if __name__ == "__main__":
     unittest.main()

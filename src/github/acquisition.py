@@ -63,7 +63,12 @@ class RepositoryAcquisitionManager:
         if self.git_runner is not None:
             return self.git_runner(args, cwd, env)
 
-        cmd = [self.git_executable] + args
+        cwd_clean = os.path.abspath(cwd).replace('\\', '/')
+        cwd_real = os.path.realpath(cwd).replace('\\', '/')
+        safe_args = ["-c", f"safe.directory={cwd_clean}"]
+        if cwd_real != cwd_clean:
+            safe_args += ["-c", f"safe.directory={cwd_real}"]
+        cmd = [self.git_executable] + safe_args + args
         full_env = os.environ.copy()
         if env:
             full_env.update(env)

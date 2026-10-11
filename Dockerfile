@@ -53,9 +53,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN groupadd -g 10001 patchguard && \
     useradd -u 10001 -g patchguard -m -s /bin/bash patchguard
 
-# Scope Git safe-directory ownership exceptions narrowly to the authorized repositories mount root
-RUN git config --system --add safe.directory "/repositories/*" && \
-    git config --system --add safe.directory "/repositories"
+# Scope Git safe-directory ownership exceptions to the authorized repositories mount root.
+# Note: Git < 2.46 does not support path wildcards (/path/*); repository subdirectories
+# are scoped as safe dynamically per subprocess invocation via git -c safe.directory.
+RUN git config --system --add safe.directory "/repositories"
 
 # Set up application workspace and mount points
 WORKDIR /app

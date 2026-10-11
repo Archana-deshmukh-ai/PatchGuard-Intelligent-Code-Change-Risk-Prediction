@@ -204,22 +204,40 @@ jobs:
           fi
 
           echo "1. Verify GET /health probe..."
-          HEALTH_RES=$(curl -s -f http://127.0.0.1:8000/health)
-          echo "Response: ${HEALTH_RES}"
+          HEALTH_STATUS=$(curl -s -o /tmp/health_res.json -w "%{http_code}" http://127.0.0.1:8000/health)
+          HEALTH_RES=$(cat /tmp/health_res.json)
+          echo "Status: ${HEALTH_STATUS}, Response: ${HEALTH_RES}"
+          if [ "${HEALTH_STATUS}" -ne 200 ]; then
+            echo "Health probe failed with HTTP ${HEALTH_STATUS}!"
+            docker logs patchguard-container
+            exit 1
+          fi
           echo "${HEALTH_RES}" | grep -q '"status":"pass"' || exit 1
 
           echo "2. Verify GET /ready probe..."
-          READY_RES=$(curl -s -f http://127.0.0.1:8000/ready)
-          echo "Response: ${READY_RES}"
+          READY_STATUS=$(curl -s -o /tmp/ready_res.json -w "%{http_code}" http://127.0.0.1:8000/ready)
+          READY_RES=$(cat /tmp/ready_res.json)
+          echo "Status: ${READY_STATUS}, Response: ${READY_RES}"
+          if [ "${READY_STATUS}" -ne 200 ]; then
+            echo "Readiness probe failed with HTTP ${READY_STATUS}!"
+            docker logs patchguard-container
+            exit 1
+          fi
           echo "${READY_RES}" | grep -q '"status":"ready"' || exit 1
           echo "${READY_RES}" | grep -q 'a32b30dff63b3a85c3fd9d9983921d5f5c5c5629acc9c206f77759c46f60f387' || exit 1
 
           echo "3. Verify POST /v1/predictions/commit (authenticated)..."
-          PRED_RES=$(curl -s -f -X POST http://127.0.0.1:8000/v1/predictions/commit \
+          PRED_STATUS=$(curl -s -o /tmp/pred_res.json -w "%{http_code}" -X POST http://127.0.0.1:8000/v1/predictions/commit \
             -H "Content-Type: application/json" \
             -H "X-API-Key: ${CI_KEY}" \
             -d "{\"repository\": \"sample-repo\", \"commit_hash\": \"${CI_COMMIT_SHA}\"}")
-          echo "Response: ${PRED_RES}"
+          PRED_RES=$(cat /tmp/pred_res.json)
+          echo "Status: ${PRED_STATUS}, Response: ${PRED_RES}"
+          if [ "${PRED_STATUS}" -ne 200 ]; then
+            echo "Prediction request failed with HTTP ${PRED_STATUS}!"
+            docker logs patchguard-container
+            exit 1
+          fi
           echo "${PRED_RES}" | grep -E -q '"decision_threshold"[[:space:]]*:[[:space:]]*0\.35' || exit 1
           echo "${PRED_RES}" | grep -E -q '"model_id"[[:space:]]*:[[:space:]]*"logistic_regression_real"' || exit 1
 

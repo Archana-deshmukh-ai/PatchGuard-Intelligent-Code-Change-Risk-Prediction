@@ -49,7 +49,12 @@ class GitRepositoryExtractor:
     def _run_git(self, args: List[str]) -> subprocess.CompletedProcess:
         """Executes a git command via subprocess inside the target repository."""
         git_executable = _find_git_executable()
-        cmd = [git_executable] + args
+        repo_clean = os.path.abspath(self.repo_path).replace('\\', '/')
+        repo_real = os.path.realpath(self.repo_path).replace('\\', '/')
+        safe_args = ["-c", f"safe.directory={repo_clean}"]
+        if repo_real != repo_clean:
+            safe_args += ["-c", f"safe.directory={repo_real}"]
+        cmd = [git_executable] + safe_args + args
         return subprocess.run(
             cmd,
             cwd=self.repo_path,

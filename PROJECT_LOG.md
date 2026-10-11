@@ -74,6 +74,22 @@ The long-term goal of PatchGuard is to build a real-world software engineering b
 > - Added CI status badge and Section 10 to `README.md` detailing automated CI gates and local reproduction commands.
 > - Emphasized that CI validation verifies test harness and container startup health in an isolated runner, remaining distinct from live production cluster deployment.
 >
+> ### 3. DOCKER RUNTIME DIAGNOSIS & NARROW REMEDIATION (CI RUN #38122332104)
+> - **Initial Run Outcome**:
+>   - `quality-and-security`: PASS (5s).
+>   - `python-tests`: PASS (61s, 248 tests passed in 19s).
+>   - `docker-verification`: Image build passed (65s), but runtime health probe step failed with `curl` exit code 22 (HTTP 400 Bad Request on prediction endpoint).
+> - **Confirmed Root Cause**:
+>   - `Dockerfile` previously configured `safe.directory "/repositories/*"`.
+>   - Debian 12 Bookworm (`python:3.12-slim-bookworm`) installs Git 2.39.x.
+>   - The path wildcard syntax (`/path/*`) was only added in Git 2.46.0 (July 2024); in Git 2.39, `/*` is treated as a literal directory path rather than a pattern.
+>   - When container unprivileged user `patchguard` (UID 10001) accessed the volume-mounted repository owned by host runner UID 1001, Git 2.39 aborted with `fatal: detected dubious ownership in repository at '/repositories/sample-repo'`, causing `GitRepositoryExtractor` to raise `ValueError`, resulting in an API HTTP 400 response.
+> - **Narrowest Safe Remediation Implemented**:
+>   - Updated Python Git runners (`src/git_extractor.py`, `src/analysis/diff_extractor.py`, `src/analysis/pr_analyzer.py`, and `src/github/acquisition.py`) to pass `-c safe.directory={repo_clean}` dynamically per subprocess invocation.
+>   - Scopes Git ownership bypass strictly to the specific authorized repository path being evaluated, completely avoiding insecure global `safe.directory="*"` wildcards.
+>   - Updated `Dockerfile` to clean up non-functional `/repositories/*` and document dynamic invocation scoping.
+>   - Enhanced `.github/workflows/ci.yml` with explicit HTTP response capture (`-w "%{http_code}"`) and diagnostic error logging on failure.
+>
 >
 > ---
 >
