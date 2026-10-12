@@ -6,23 +6,25 @@
 The long-term goal of PatchGuard is to build a real-world software engineering bug-risk prediction system. The final architecture will analyze code changes (Git commits / Pull Requests), predict bug probability using Machine Learning, provide LLM-driven risk explanations, leverage RAG over repository documentation/issues/PR history, and integrate into developer CI/CD workflows to give actionable recommendations.
 
 ## Current Stage
-**Phase 10.4 Complete — CI/CD & Deployment Readiness Implemented and Configured**
+**Phase 10.5 Complete — Deployment Hardening & Operational Readiness Implemented and Verified**
 
 
 ### Handoff Guide for Future AI / Developer Sessions
 > [!IMPORTANT]
-> **Phase 10.4 (CI/CD & Deployment Readiness) is COMPLETE and CHECKPOINTED**.
+> **Phase 10.5 (Deployment Hardening & Operational Readiness) is COMPLETE and VERIFIED in working tree**.
 >
 > When resuming development in a future session:
 > 1. First inspect [`README.md`](file:///c:/Projects/CODE_project/bug-prediction/README.md), [`PROJECT_LOG.md`](file:///c:/Projects/CODE_project/bug-prediction/PROJECT_LOG.md), [`.github/workflows/ci.yml`](file:///c:/Projects/CODE_project/bug-prediction/.github/workflows/ci.yml), `git status`, and `git log`.
-> 2. Understand that Phase 10.4 implements an automated, production-grade GitHub Actions CI workflow:
->    - Workflow file: `.github/workflows/ci.yml`.
->    - Job 1 (`quality-and-security`): Enforces git whitespace formatting (`git diff --check`), immutable model/scaler SHA-256 hash invariance, and automated secret scanning.
->    - Job 2 (`python-tests`): Executes the approved 12-module Python regression suite (248 unit tests) in Python 3.12, strictly withholding `tests.test_phase8_benchmarking` to protect benchmark artifacts from regeneration.
->    - Job 3 (`docker-verification`): Builds the multi-stage `Dockerfile` on native Linux runners, launches an ephemeral container on `127.0.0.1:8000`, verifies `/health` and `/ready`, runs authenticated commit defect risk prediction against an isolated Git test repository, and performs automated resource teardown.
-> 3. Security posture: The CI workflow operates under least-privilege `permissions: contents: read`. No deployment credentials or external API keys are required for test execution.
-> 4. The production model artifacts (`models/logistic_regression_real.pkl` and `models/real_data_scaler.pkl`) and Phase 5 prediction behavior remain 100% preserved and untouched (SHA-256 verified).
-> 5. Active test suite status: 258 total tests discovered across 13 test modules; 248 non-benchmark unit tests pass 100% offline with zero failures and zero errors.
+> 2. Understand that Phase 10.5 implements end-to-end operational hardening:
+>    - Bounded Git subprocess timeouts (`timeout: Optional[float] = 30.0`) in `src/git_extractor.py` preventing hanging child processes.
+>    - Sanitized structured error logging in `src/api/error_handlers.py` redacting credentials, tokens, authorization headers, raw diffs, and filesystem paths in 500 error messages and tracebacks.
+>    - Repository root directory validation in `/ready` probe (`src/api/service.py`) returning standard HTTP 503 (`SERVICE_NOT_READY`) when missing or invalid.
+>    - Live container CI security assertions in `.github/workflows/ci.yml` verifying HTTP 401 unauthenticated rejection and HTTP 403 path traversal rejection.
+>    - Request duration and operational prediction metadata observability in `POST /v1/predictions/commit`.
+>    - Actionable startup security warning in ASGI lifespan when binding wildcard interface (`0.0.0.0`/`::`) without an API key.
+>    - Environment variable forwarding `PATCHGUARD_API_KEY: ${PATCHGUARD_API_KEY:-}` in `docker-compose.yml`.
+> 3. Active test suite status: 267 total tests discovered across 13 test modules; 257 non-benchmark unit tests pass 100% offline with zero failures and zero errors (all 12 approved modules: `tests.test_analysis_pipeline`=24, `tests.test_analysis_schema`=11, `tests.test_api`=23, `tests.test_cli`=9, `tests.test_dashboard`=77, `tests.test_diff_extractor`=17, `tests.test_github_integration`=23, `tests.test_github_workflow`=16, `tests.test_openai_provider`=8, `tests.test_pr_analyzer`=11, `tests.test_prediction_engine`=12, `tests.test_repository_acquisition`=23).
+> 4. The production model artifacts (`models/logistic_regression_real.pkl` and `models/real_data_scaler.pkl`), locked threshold 0.35, and canonical feature schema `v1.0-10features` remain 100% preserved and untouched (SHA-256 verified).
 >
 > **Long-Term Roadmap**:
 > 1. Project & ML Foundation — **COMPLETE**
@@ -40,7 +42,69 @@ The long-term goal of PatchGuard is to build a real-world software engineering b
 > 13. Productionization: Architecture Inspection & Design (Phase 10.1) — **COMPLETE**
 > 14. Productionization: REST API & Automated Tests (Phase 10.2) — **COMPLETE**
 > 15. Productionization: Docker Containerization & Verification (Phase 10.3) — **COMPLETE & HARDENED**
-> 16. **Productionization: CI/CD & Deployment Readiness (Phase 10.4) — COMPLETE**
+> 16. Productionization: CI/CD & Deployment Readiness (Phase 10.4) — **COMPLETE**
+> 17. **Productionization: Deployment Hardening & Operational Readiness (Phase 10.5) — COMPLETE**
+>
+>
+> ---
+>
+> ## Phase 10.5 Deployment Hardening & Operational Readiness
+>
+> Completed Phase 10.5 (Deployment Hardening & Operational Readiness), implementing production resilience improvements, structured logging with secret and path redaction, repository readiness validation, live container security assertions in CI, and request-level prediction observability.
+>
+> ### 1. IMPLEMENTED HARDENING COMPONENTS & DESIGN DECISIONS
+> - **Safe Bounded Git Subprocess Timeout (`src/git_extractor.py`)**:
+>   - Added `timeout: Optional[float] = 30.0` parameter to `_run_git()`.
+>   - Catches `subprocess.TimeoutExpired`, terminates hanging child process, and raises structured `GitExtractionError` containing sanitized command summary and timeout duration.
+>   - Dynamic per-invocation `safe.directory={clean_repo}` configuration and repository boundary checks remain fully preserved.
+>   - Avoided circular imports by lazily importing `GitExtractionError` within the timeout exception handler.
+> - **Sanitized Structured Error Logging (`src/api/error_handlers.py`)**:
+>   - Initialized structured logger `logger = logging.getLogger("patchguard.api")`.
+>   - Enhanced `_sanitize_message()` with credential and token redaction patterns (`ghp_`, `sk-`, `X-API-Key`, Bearer/Basic auth headers).
+>   - Created `_format_sanitized_traceback(exc)` to format and scrub full stack traces, removing Windows drive letters, user directories, and container paths (`/repositories/...`, `/app/...`) while preserving file names and line numbers for debugging.
+>   - 500 error handlers for `PatchGuardError` and unhandled `Exception` log sanitized stack traces without leaking raw sensitive parameters into logs.
+>   - Service readiness failure handler logs structured warning with remediation advice before returning HTTP 503 (`SERVICE_NOT_READY`).
+> - **Repository Root Directory Readiness Check (`src/api/service.py`)**:
+>   - In `PredictionService.check_readiness()`, added explicit existence and directory validation for `self.config.allowed_repos_root`.
+>   - Raises `ServiceNotReadyError` (HTTP 503) if `allowed_repos_root` is unset, does not exist on disk, or is not a valid directory.
+>   - Prevents unmounted container volume misconfigurations from falsely reporting ready to orchestrators.
+> - **Prediction Duration & Operational Observability (`src/api/app.py`)**:
+>   - Instrumented `POST /v1/predictions/commit` with `time.perf_counter()` to record wall-clock execution latency.
+>   - Logs non-sensitive operational payload upon inference completion: `duration_ms`, short commit hash (first 7 characters), predicted risk score, and risk level.
+>   - Raw source code diffs, file lists, and sensitive payload data remain excluded from operational logging.
+> - **Wildcard Network Host Startup Security Warning (`src/api/app.py`)**:
+>   - In ASGI `lifespan` startup hook, inspects `app.state.config.host` and `app.state.config.api_key`.
+>   - Logs actionable security warning if binding to wildcard interface (`0.0.0.0` or `::`) without an API key configured, guiding operators to set `PATCHGUARD_API_KEY`.
+> - **Docker Compose Environment Forwarding (`docker-compose.yml`)**:
+>   - Updated environment mapping to pass `PATCHGUARD_API_KEY: ${PATCHGUARD_API_KEY:-}`, enabling seamless credential forwarding from host environment.
+>
+> ### 2. LIVE DOCKER CONTAINER CI SECURITY ASSERTIONS (`.github/workflows/ci.yml`)
+> - Extended `docker-verification` job in GitHub Actions with two automated security assertion steps:
+>   - **Step 4 (Unauthenticated Request Rejection)**: Sends `POST /v1/predictions/commit` without `X-API-Key` header, asserting `HTTP 401 AUTHENTICATION_REQUIRED`.
+>   - **Step 5 (Repository Path Traversal Rejection)**: Sends `POST /v1/predictions/commit` with payload `{"repository": ".."}` targeting repository containment guard, asserting `HTTP 403 FORBIDDEN_REPOSITORY_ACCESS`. (Note: testing `"../outside"` is intercepted at the schema level by Pydantic regex validation with HTTP 422 `VALIDATION_ERROR`; `"repository": ".."` validly passes schema validation to test the repository containment boundary).
+> - Both steps verify exact HTTP status codes and response error codes, ensuring zero API key leakage in CI workflow logs.
+>
+> ### 3. AUTOMATED TEST VERIFICATION
+> - Added Section 8 in `tests/test_api.py` with 6 new comprehensive unit tests:
+>   - `test_ready_endpoint_missing_repo_root_503`: Verifies `/ready` returns 503 when configured repository root does not exist.
+>   - `test_500_engine_error_logging_redaction`: Verifies 500 error handler redacts secrets, tokens, and filesystem paths from logged messages and tracebacks.
+>   - `test_500_unhandled_exception_logging_redaction`: Verifies unhandled exception 500 handler redacts secrets and tracebacks.
+>   - `test_git_subprocess_timeout_expired_handling`: Verifies `subprocess.TimeoutExpired` is handled cleanly as `GitExtractionError`.
+>   - `test_startup_security_warning_on_wildcard_host_without_key`: Verifies ASGI lifespan logs warning when host is `0.0.0.0` and API key is unset.
+>   - `test_predict_commit_observability_logging`: Verifies `POST /v1/predictions/commit` logs request duration and operational metrics.
+> - Executed full 12-module approved non-benchmark regression suite:
+>   - **257/257 unit tests passed** in 480.7s (0 failures, 0 errors, 0 skipped).
+>   - 10 Phase 8 benchmark tests (`tests.test_phase8_benchmarking`) remained safely excluded.
+>
+> ### 4. PRODUCTION ARTIFACT IMMUTABILITY
+> - `models/logistic_regression_real.pkl`: `A32B30DFF63B3A85C3FD9D9983921D5F5C5C5629ACC9C206F77759C46F60F387` (verified byte-identical).
+> - `models/real_data_scaler.pkl`: `C8E65F768DAB97ACF8DF573DA60F6B1C0E9232EBF2173677F88E3EFA5C479B49` (verified byte-identical).
+> - Locked threshold: `0.35`. Canonical feature schema: `v1.0-10features`.
+>
+> ### 5. LOCAL VS. PRODUCTION OPERATIONAL MATRIX
+> - **Local Development**: Runs on loopback `127.0.0.1`, optional API key, local filesystem path for repositories, plain HTTP.
+> - **Production Container**: Runs inside container network (`0.0.0.0:8000`), mandatory `PATCHGUARD_API_KEY`, host repository volume mounted `:ro` to `/repositories`, TLS terminated externally via reverse proxy, unprivileged user `patchguard` (UID 10001).
+> - **Subprocess Timeouts**: Enforced 30.0s Git execution timeout prevents lingering worker processes.
 >
 >
 > ---

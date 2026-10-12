@@ -17,8 +17,8 @@ services:
       - PATCHGUARD_PORT=8000
       - PATCHGUARD_REPOS_ROOT=/repositories
       - PATCHGUARD_MODELS_DIR=/app/models
-      # Set API key for authenticated deployment
-      # - PATCHGUARD_API_KEY=your-secure-api-key
+      # Set API key on host or .env to enforce authentication (empty string disables auth for local dev)
+      - PATCHGUARD_API_KEY=${PATCHGUARD_API_KEY:-}
     volumes:
       # Mount host directory containing Git repositories (read-only for inference safety)
       - ./repositories:/repositories:ro

@@ -241,6 +241,33 @@ jobs:
           echo "${PRED_RES}" | grep -E -q '"decision_threshold"[[:space:]]*:[[:space:]]*0\.35' || exit 1
           echo "${PRED_RES}" | grep -E -q '"model_id"[[:space:]]*:[[:space:]]*"logistic_regression_real"' || exit 1
 
+          echo "4. Verify POST /v1/predictions/commit (unauthenticated rejection - 401)..."
+          UNAUTH_STATUS=$(curl -s -o /tmp/unauth_res.json -w "%{http_code}" -X POST http://127.0.0.1:8000/v1/predictions/commit \
+            -H "Content-Type: application/json" \
+            -d "{\"repository\": \"sample-repo\", \"commit_hash\": \"${CI_COMMIT_SHA}\"}")
+          UNAUTH_RES=$(cat /tmp/unauth_res.json)
+          echo "Status: ${UNAUTH_STATUS}, Response: ${UNAUTH_RES}"
+          if [ "${UNAUTH_STATUS}" -ne 401 ]; then
+            echo "Unauthenticated request was not rejected with HTTP 401! Got: ${UNAUTH_STATUS}"
+            docker logs patchguard-container
+            exit 1
+          fi
+          echo "${UNAUTH_RES}" | grep -q '"AUTHENTICATION_REQUIRED"' || exit 1
+
+          echo "5. Verify POST /v1/predictions/commit (path traversal rejection - 403)..."
+          TRAVERSAL_STATUS=$(curl -s -o /tmp/traversal_res.json -w "%{http_code}" -X POST http://127.0.0.1:8000/v1/predictions/commit \
+            -H "Content-Type: application/json" \
+            -H "X-API-Key: ${CI_KEY}" \
+            -d "{\"repository\": \"..\", \"commit_hash\": \"${CI_COMMIT_SHA}\"}")
+          TRAVERSAL_RES=$(cat /tmp/traversal_res.json)
+          echo "Status: ${TRAVERSAL_STATUS}, Response: ${TRAVERSAL_RES}"
+          if [ "${TRAVERSAL_STATUS}" -ne 403 ]; then
+            echo "Path traversal request was not rejected with HTTP 403! Got: ${TRAVERSAL_STATUS}"
+            docker logs patchguard-container
+            exit 1
+          fi
+          echo "${TRAVERSAL_RES}" | grep -q '"FORBIDDEN_REPOSITORY_ACCESS"' || exit 1
+
           echo "All runtime container verification checks passed successfully."
 
       - name: Teardown container and test fixtures

@@ -2,6 +2,7 @@
 FastAPI application entrypoint and route definitions for PatchGuard REST API.
 """
 
+import time
 import hmac
 import logging
 from typing import Optional
@@ -65,9 +66,17 @@ def create_app(
         app.state.config = active_config
 
         if active_config.api_key is None:
-            logger.warning(
-                "PATCHGUARD_API_KEY is not set. API is operating in unauthenticated local-development mode."
-            )
+            if active_config.host in ("0.0.0.0", "::"):
+                logger.warning(
+                    "SECURITY WARNING: Server is bound to all network interfaces (%s) without PATCHGUARD_API_KEY. "
+                    "All incoming requests will be permitted without authentication. "
+                    "For production or network deployments, set PATCHGUARD_API_KEY.",
+                    active_config.host
+                )
+            else:
+                logger.warning(
+                    "PATCHGUARD_API_KEY is not set. API is operating in unauthenticated local-development mode."
+                )
         yield
         # App shutdown
         pass
@@ -151,10 +160,21 @@ def create_app(
         Predicts defect risk for a specific commit in an allowlisted repository
         using the production Logistic Regression model at locked threshold 0.35.
         """
-        return svc.predict_commit(
+        start_time = time.perf_counter()
+        result = svc.predict_commit(
             repository=request_body.repository,
             commit_hash=request_body.commit_hash
         )
+        duration_ms = (time.perf_counter() - start_time) * 1000.0
+        logger.info(
+            "Prediction completed: repo=%s commit=%s risk_level=%s score=%.4f duration_ms=%.2f",
+            request_body.repository,
+            result.commit.commit_hash,
+            result.prediction.risk_level,
+            result.prediction.raw_probability,
+            duration_ms
+        )
+        return result
 
     return app
 

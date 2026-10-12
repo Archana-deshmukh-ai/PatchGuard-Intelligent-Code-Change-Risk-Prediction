@@ -3,6 +3,9 @@ Structured error handling and HTTP exception mapping for PatchGuard REST API.
 Ensures zero leakage of stack traces, internal server paths, credentials, or source code.
 """
 
+import re
+import logging
+import traceback
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
@@ -25,14 +28,25 @@ from .service import (
 )
 
 
+logger = logging.getLogger("patchguard.api")
+
+
 def _sanitize_message(msg: str) -> str:
     """Removes local drive letters, absolute file paths, and sensitive tokens."""
-    import re
     # Strip Windows drive paths (e.g. C:\... or C:/...)
     msg = re.sub(r'[A-Za-z]:[\\/][^:\s]+', '[protected-path]', msg)
     # Strip Unix-style root paths (e.g. /home/..., /var/..., /repositories/..., /app/...)
     msg = re.sub(r'/(?:var|tmp|home|etc|usr|opt|repositories|app)/[^\s:]+', '[protected-path]', msg)
+    # Strip sensitive tokens / credentials if present
+    msg = re.sub(r'(?:ghp_[a-zA-Z0-9]{36}|github_pat_[a-zA-Z0-9_]{82}|sk-[a-zA-Z0-9]{20,})', '[protected-token]', msg)
+    msg = re.sub(r'(?i)x-api-key[:=]\s*[^\s,;]+', 'X-API-Key: [protected-key]', msg)
     return msg
+
+
+def _format_sanitized_traceback(exc: Exception) -> str:
+    """Formats full exception traceback with paths and credentials redacted."""
+    raw_tb = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
+    return _sanitize_message(raw_tb)
 
 
 def register_error_handlers(app: FastAPI) -> None:
@@ -146,6 +160,11 @@ def register_error_handlers(app: FastAPI) -> None:
 
     @app.exception_handler(ServiceNotReadyError)
     async def service_not_ready_handler(request: Request, exc: ServiceNotReadyError):
+        logger.warning(
+            "Service readiness probe failed: %s (path=%s)",
+            _sanitize_message(str(exc)),
+            request.url.path
+        )
         return JSONResponse(
             status_code=503,
             content={
@@ -199,12 +218,22 @@ def register_error_handlers(app: FastAPI) -> None:
 
     @app.exception_handler(PatchGuardError)
     async def generic_engine_error_handler(request: Request, exc: PatchGuardError):
+        sanitized_msg = _sanitize_message(str(exc))
+        sanitized_tb = _format_sanitized_traceback(exc)
+        logger.error(
+            "Internal engine error [%s]: %s (path=%s, method=%s)\n%s",
+            exc.__class__.__name__,
+            sanitized_msg,
+            request.url.path,
+            request.method,
+            sanitized_tb
+        )
         return JSONResponse(
             status_code=500,
             content={
                 "error": {
                     "code": "INTERNAL_ENGINE_ERROR",
-                    "message": _sanitize_message(str(exc)),
+                    "message": sanitized_msg,
                     "remediation": "An internal error occurred during prediction engine processing."
                 }
             }
@@ -212,6 +241,16 @@ def register_error_handlers(app: FastAPI) -> None:
 
     @app.exception_handler(Exception)
     async def unhandled_exception_handler(request: Request, exc: Exception):
+        sanitized_msg = _sanitize_message(str(exc))
+        sanitized_tb = _format_sanitized_traceback(exc)
+        logger.error(
+            "Unhandled server exception [%s]: %s (path=%s, method=%s)\n%s",
+            exc.__class__.__name__,
+            sanitized_msg,
+            request.url.path,
+            request.method,
+            sanitized_tb
+        )
         return JSONResponse(
             status_code=500,
             content={

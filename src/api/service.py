@@ -94,6 +94,13 @@ class PredictionService:
                 f"Scaler artifact hash mismatch: loaded {eng.scaler_artifact_hash[:16]}..., expected {EXPECTED_SCALER_HASH[:16]}..."
             )
 
+        # Validate configured repository root exists and is an accessible directory
+        repos_root = self.config.allowed_repos_root
+        if not repos_root or not os.path.exists(repos_root) or not os.path.isdir(repos_root):
+            raise ServiceNotReadyError(
+                "Configured repository root does not exist or is not an accessible directory."
+            )
+
         return ReadyResponse(
             status="ready",
             model_id=eng.MODEL_ID,

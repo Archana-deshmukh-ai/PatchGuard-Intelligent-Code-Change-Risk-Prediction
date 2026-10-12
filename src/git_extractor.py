@@ -46,8 +46,8 @@ class GitRepositoryExtractor:
         if res.returncode != 0:
             raise ValueError(f"Directory is not a valid Git repository: {self.repo_path}")
 
-    def _run_git(self, args: List[str]) -> subprocess.CompletedProcess:
-        """Executes a git command via subprocess inside the target repository."""
+    def _run_git(self, args: List[str], timeout: Optional[float] = 30.0) -> subprocess.CompletedProcess:
+        """Executes a git command via subprocess inside the target repository with timeout safety."""
         git_executable = _find_git_executable()
         repo_clean = os.path.abspath(self.repo_path).replace('\\', '/')
         repo_real = os.path.realpath(self.repo_path).replace('\\', '/')
@@ -55,15 +55,23 @@ class GitRepositoryExtractor:
         if repo_real != repo_clean:
             safe_args += ["-c", f"safe.directory={repo_real}"]
         cmd = [git_executable] + safe_args + args
-        return subprocess.run(
-            cmd,
-            cwd=self.repo_path,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            encoding='utf-8',
-            errors='replace'
-        )
+        try:
+            return subprocess.run(
+                cmd,
+                cwd=self.repo_path,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                encoding='utf-8',
+                errors='replace',
+                timeout=timeout
+            )
+        except subprocess.TimeoutExpired as exc:
+            from src.engine.exceptions import GitExtractionError
+            safe_cmd_summary = "git " + " ".join(args)
+            raise GitExtractionError(
+                f"Git command timed out after {timeout}s: {safe_cmd_summary}"
+            ) from exc
 
     def _parse_filepath(self, file_path_str: str) -> str:
         """

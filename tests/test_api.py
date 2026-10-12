@@ -435,6 +435,125 @@ class TestPatchGuardAPI(unittest.TestCase):
         self.assertNotIn("C:\\", sanitized)
         self.assertIn("[protected-path]", sanitized)
 
+    # -------------------------------------------------------------------------
+    # 8. Operational Readiness & Deployment Hardening (Phase 10.5)
+    # -------------------------------------------------------------------------
+    def test_ready_endpoint_missing_repo_root_503(self):
+        """GET /ready returns HTTP 503 when configured repository root does not exist."""
+        nonexistent_root = os.path.join(self.workspace_dir, "nonexistent_subfolder")
+        cfg = APIConfig(
+            allowed_repos_root=nonexistent_root,
+            models_dir=self.models_dir
+        )
+        svc = PredictionService(config=cfg)
+        test_app = create_app(config=cfg, service=svc)
+        test_client = TestClient(test_app)
+
+        response = test_client.get("/ready")
+        self.assertEqual(response.status_code, 503)
+        data = response.json()
+        self.assertEqual(data["error"]["code"], "SERVICE_NOT_READY")
+
+    def test_500_engine_error_logging_redaction(self):
+        """Verifies that 500 PatchGuardError handler logs sanitized diagnostics with tracebacks."""
+        from unittest.mock import patch
+        from src.engine.exceptions import PatchGuardError
+
+        with patch.object(
+            self.service,
+            "predict_commit",
+            side_effect=PatchGuardError("Internal failure in C:\\private\\data.py with ghp_111122223333444455556666777788889999")
+        ):
+            with self.assertLogs("patchguard.api", level="ERROR") as log_capture:
+                response = self.client.post(
+                    "/v1/predictions/commit",
+                    json={"repository": self.repo_name, "commit_hash": "HEAD"}
+                )
+
+            self.assertEqual(response.status_code, 500)
+            data = response.json()
+            self.assertEqual(data["error"]["code"], "INTERNAL_ENGINE_ERROR")
+            # Ensure paths and secrets were redacted in response and log
+            self.assertNotIn("C:\\private", data["error"]["message"])
+            self.assertNotIn("ghp_", data["error"]["message"])
+            self.assertIn("[protected-path]", data["error"]["message"])
+            self.assertIn("[protected-token]", data["error"]["message"])
+
+            log_output = "\n".join(log_capture.output)
+            self.assertIn("Internal engine error [PatchGuardError]:", log_output)
+            self.assertNotIn("C:\\private", log_output)
+            self.assertNotIn("ghp_", log_output)
+
+    def test_500_unhandled_exception_logging_redaction(self):
+        """Verifies that unhandled server exceptions log tracebacks and return sanitized error."""
+        from unittest.mock import patch
+
+        unhandled_client = TestClient(self.app, raise_server_exceptions=False)
+        with patch.object(
+            self.service,
+            "predict_commit",
+            side_effect=RuntimeError("Unexpected runtime crash in /app/secret_code.py")
+        ):
+            with self.assertLogs("patchguard.api", level="ERROR") as log_capture:
+                response = unhandled_client.post(
+                    "/v1/predictions/commit",
+                    json={"repository": self.repo_name, "commit_hash": "HEAD"}
+                )
+
+            self.assertEqual(response.status_code, 500)
+            data = response.json()
+            self.assertEqual(data["error"]["code"], "INTERNAL_SERVER_ERROR")
+
+            log_output = "\n".join(log_capture.output)
+            self.assertIn("Unhandled server exception [RuntimeError]:", log_output)
+            self.assertNotIn("/app/secret_code.py", log_output)
+            self.assertIn("[protected-path]", log_output)
+
+    def test_git_subprocess_timeout_expired_handling(self):
+        """Verifies that GitRepositoryExtractor raises GitExtractionError on subprocess timeout."""
+        from src.git_extractor import GitRepositoryExtractor
+        from src.engine.exceptions import GitExtractionError
+
+        extractor = GitRepositoryExtractor(self.repo_path)
+        with self.assertRaises(GitExtractionError) as ctx:
+            extractor._run_git(["status"], timeout=0.0000001)
+
+        err_msg = str(ctx.exception)
+        self.assertIn("Git command timed out after", err_msg)
+        self.assertIn("git status", err_msg)
+
+    def test_startup_security_warning_on_wildcard_host_without_key(self):
+        """Verifies actionable security warning when binding 0.0.0.0 without API key."""
+        wildcard_cfg = APIConfig(
+            host="0.0.0.0",
+            port=8000,
+            api_key=None,
+            allowed_repos_root=self.allowed_repos_root,
+            models_dir=self.models_dir
+        )
+        with self.assertLogs("patchguard.api", level="WARNING") as log_capture:
+            app_wildcard = create_app(config=wildcard_cfg)
+            with TestClient(app_wildcard):
+                pass
+
+        log_output = "\n".join(log_capture.output)
+        self.assertIn("SECURITY WARNING: Server is bound to all network interfaces (0.0.0.0)", log_output)
+
+    def test_predict_commit_observability_logging(self):
+        """Verifies that predict_commit logs performance duration and non-sensitive metadata."""
+        with self.assertLogs("patchguard.api", level="INFO") as log_capture:
+            response = self.client.post(
+                "/v1/predictions/commit",
+                json={"repository": self.repo_name, "commit_hash": "HEAD"}
+            )
+
+        self.assertEqual(response.status_code, 200)
+        log_output = "\n".join(log_capture.output)
+        self.assertIn("Prediction completed: repo=test-repo", log_output)
+        self.assertIn("risk_level=", log_output)
+        self.assertIn("score=", log_output)
+        self.assertIn("duration_ms=", log_output)
+
     def test_production_artifacts_unmodified_after_test_suite(self):
         """Verifies production model and scaler artifact SHA-256 hashes are 100% identical."""
         current_model_hash = compute_file_sha256(self.model_path)

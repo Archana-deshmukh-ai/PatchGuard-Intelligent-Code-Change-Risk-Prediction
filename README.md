@@ -33,7 +33,7 @@ PatchGuard includes a modular ML experiment benchmarking framework (`src/experim
   - Zero repository code execution (no setup.py, npm, build, or test scripts executed).
   - Credentials, JWTs, installation tokens, and authorization headers are sanitized and never exposed in logs, tracebacks, exception strings, or GitHub PR comments.
 - **Offline Test Verification**:
-  - Full automated test suite (170 passing unit tests) operates 100% offline using mock HTTP fetchers, temporary Git repositories, and isolated experiment runners without external network dependencies.
+  - Full automated test suite (257 passing non-benchmark unit tests across 12 modules) operates 100% offline using mock HTTP fetchers, temporary Git repositories, and isolated experiment runners without external network dependencies.
 
 
 ---
@@ -254,7 +254,7 @@ PatchGuard is packaged as a reproducible, multi-stage Docker container (`Dockerf
 * **Virtual Environment**: Isolated `/opt/venv` virtual environment in multi-stage build.
 * **Security & Non-Root Execution**: Runs under unprivileged user `patchguard` (UID/GID `10001`). Zero root daemon privileges.
 * **System Dependencies**: Includes `git` (for repository mining and diff extraction), `curl` (for health probing), and `libgomp1` (OpenMP support for ML inference).
-* **Git Safe Directory**: Configured system-level `safe.directory` for `/repositories/*` to eliminate permission collisions across host-mounted volumes.
+* **Git Safe Directory**: Configured system-level `safe.directory` for `/repositories`, complemented by dynamic per-invocation `safe.directory` scoping in Python Git execution paths (`git -c safe.directory=<path>`) to eliminate permission collisions across host-mounted volumes without relying on Git wildcard patterns.
 * **Repository Volume-Mount Strategy**:
   - The container expects host Git repositories mounted at `/repositories` (or custom path via `PATCHGUARD_REPOS_ROOT`).
   - Read-only mounting (`:ro`) is strongly recommended for inference safety:
@@ -303,14 +303,16 @@ PatchGuard includes an automated GitHub Actions CI workflow (`.github/workflows/
      - Runs automated secret scanning to prevent credential leaks.
   2. **Python Regression Suite (`python-tests`)**:
      - Installs dependencies in Python 3.12 runner.
-     - Executes all 12 approved non-benchmark unit test modules (248 tests).
+     - Executes all 12 approved non-benchmark unit test modules (257 tests).
      - Strictly excludes Phase 8 benchmark runner (`tests.test_phase8_benchmarking`) to safeguard benchmark results from unintended regeneration.
      - Confirms zero model artifact mutation post-test execution.
   3. **Docker Build & Runtime Verification (`docker-verification`)**:
      - Builds multi-stage `Dockerfile` on native Linux runner.
      - Starts container with ephemeral CI API key bound locally to `127.0.0.1:8000`.
      - Validates process liveness probe (`GET /health`).
-     - Validates model and scaler readiness probe (`GET /ready`).
+     - Validates model, scaler, and repository root readiness probe (`GET /ready`).
+     - Validates unauthenticated request rejection (`HTTP 401 AUTHENTICATION_REQUIRED`).
+     - Validates repository path-traversal rejection (`HTTP 403 FORBIDDEN_REPOSITORY_ACCESS`).
      - Executes authenticated commit defect risk prediction (`POST /v1/predictions/commit`) against a temporary Git test repository.
      - Tears down and cleans up container and test workspace resources.
 
@@ -333,7 +335,44 @@ PatchGuard includes an automated GitHub Actions CI workflow (`.github/workflows/
 
 ---
 
-## 11. Current Limitations & Key Learnings
+## 11. Deployment Hardening & Operational Readiness (Phase 10.5)
+
+Phase 10.5 introduces operational hardening across the inference engine, API service, container environment, and CI automation:
+
+* **Safe Bounded Subprocess Execution**:
+  - `src/git_extractor.py` enforces a 30.0-second default timeout (`timeout: Optional[float] = 30.0`) on all Git subprocess invocations.
+  - Catches `subprocess.TimeoutExpired` and translates it into a structured `GitExtractionError` with a sanitized command summary, preventing hung worker processes during large or unresponsive repository mining.
+* **Sanitized Structured Error Logging**:
+  - API 500 error handlers in `src/api/error_handlers.py` sanitize log messages and full stack traces.
+  - Automatically redacts sensitive patterns including credentials (`ghp_`, `sk-`, `X-API-Key`), authorization headers, raw code diffs, and host/container filesystem paths (`C:\...`, `/repositories/...`, `/app/...`).
+  - Readiness probe (`/ready`) failures log structured warnings with remediation steps before returning HTTP 503 (`SERVICE_NOT_READY`).
+* **Repository Root Readiness Validation**:
+  - `PredictionService.check_readiness()` (`src/api/service.py`) validates that `allowed_repos_root` exists and is a directory.
+  - Unconfigured or missing repository roots raise `ServiceNotReadyError` (HTTP 503), preventing containers from reporting ready when repository storage is unmounted.
+* **Automated CI Container Security Assertions**:
+  - Live Docker CI verification (`.github/workflows/ci.yml`) executes end-to-end security assertions against the running container:
+    - Verifies unauthenticated prediction requests are rejected with `HTTP 401 AUTHENTICATION_REQUIRED`.
+    - Verifies repository boundary escapes (`..`) are rejected with `HTTP 403 FORBIDDEN_REPOSITORY_ACCESS`.
+* **Prediction Observability**:
+  - `POST /v1/predictions/commit` in `src/api/app.py` logs operational request completion metrics including duration (`ms`), truncated commit hash, predicted risk score, and risk level.
+  - File paths and source code diff contents are strictly excluded from operational logs.
+* **Startup Security Warnings**:
+  - ASGI lifespan in `src/api/app.py` logs an actionable warning if the service binds to a wildcard interface (`0.0.0.0` or `::`) without an API key configured.
+* **Environment Forwarding**:
+  - `docker-compose.yml` forwards `PATCHGUARD_API_KEY: ${PATCHGUARD_API_KEY:-}` to respect host environment credentials.
+* **Local vs. Production Operational Matrix**:
+  | Concern | Local Development | Production Container Deployment |
+  | :--- | :--- | :--- |
+  | **Host Binding** | `127.0.0.1` (loopback) | `0.0.0.0` (internal container network) behind TLS reverse proxy |
+  | **Authentication** | Optional for local debugging | Mandatory `PATCHGUARD_API_KEY` (enforced via constant-time check) |
+  | **Repository Mount** | Local path via `PATCHGUARD_REPOS_ROOT` | Host path mounted read-only (`:ro`) to `/repositories` |
+  | **TLS / SSL** | Plain HTTP | Terminated at reverse proxy (Nginx, Traefik, Cloudflare) |
+  | **Process User** | Current developer account | Unprivileged user `patchguard` (UID `10001`) |
+  | **Timeouts** | 30.0s Git subprocess timeout | 30.0s Git subprocess timeout + HTTP reverse proxy timeout |
+
+---
+
+## 12. Current Limitations & Key Learnings
 
 1. **Shallow Feature Representation**: Commit-level diff metrics capture commit size and dispersion, but do not capture deep AST structure or semantic code logic.
 2. **Detection of Small Patches**: Small, single-file bug fixes produce small diff footprints, making them harder for churn metrics alone to detect (leading to False Negatives).
@@ -346,7 +385,7 @@ PatchGuard includes an automated GitHub Actions CI workflow (`.github/workflows/
 
 ---
 
-## 12. Project Roadmap
+## 13. Project Roadmap
 
 - [x] **Phase 1: Project & ML Foundation** — Supervised binary classification framing, synthetic pipeline verification, baseline evaluation metrics.
 - [x] **Phase 2: Real Git Repository Mining** — Subprocess-based `GitRepositoryExtractor` parsing 10 commit-time diff features across Git history.
@@ -363,3 +402,4 @@ PatchGuard includes an automated GitHub Actions CI workflow (`.github/workflows/
 - [x] **Phase 10.2: REST API & Automated Tests** — FastAPI service, Pydantic v2 schemas, endpoints (/health, /ready, /v1/predictions/commit), API key auth, repository allowlisting, locked 0.35 threshold.
 - [x] **Phase 10.3: Docker Containerization & Verification** — Multi-stage Dockerfile (python:3.12-slim), non-root user (10001), Git CLI, health check, volume-mount design, docker-compose.yml.
 - [x] **Phase 10.4: CI/CD & Deployment Readiness** — Automated GitHub Actions CI workflow (`.github/workflows/ci.yml`), automated testing gates, and deployment readiness.
+- [x] **Phase 10.5: Deployment Hardening & Operational Readiness** — Bounded Git timeouts (30.0s), sanitized structured logging & traceback redaction, readiness repository root validation, CI security assertions (401/403), request duration observability, wildcard bind security warning.
