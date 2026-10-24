@@ -459,10 +459,11 @@ class TestPatchGuardAPI(unittest.TestCase):
         from unittest.mock import patch
         from src.engine.exceptions import PatchGuardError
 
+        dummy_token = "ghp_" + ("1" * 36)
         with patch.object(
             self.service,
             "predict_commit",
-            side_effect=PatchGuardError("Internal failure in C:\\private\\data.py with ghp_111122223333444455556666777788889999")
+            side_effect=PatchGuardError(f"Internal failure in C:\\private\\data.py with {dummy_token}")
         ):
             with self.assertLogs("patchguard.api", level="ERROR") as log_capture:
                 response = self.client.post(
