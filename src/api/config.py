@@ -19,6 +19,8 @@ class APIConfig:
     models_dir: Optional[str] = None
     default_threshold: float = 0.35
     git_timeout_seconds: float = 30.0
+    max_pr_commits: int = 100
+    pr_timeout_seconds: float = 60.0
 
     def __post_init__(self):
         if not self.allowed_repos_root:
@@ -42,6 +44,16 @@ class APIConfig:
         allowed_repos_root = os.getenv("PATCHGUARD_REPOS_ROOT", os.getcwd())
         models_dir = os.getenv("PATCHGUARD_MODELS_DIR", None)
 
+        try:
+            max_pr_commits = int(os.getenv("PATCHGUARD_MAX_PR_COMMITS", "100"))
+        except (ValueError, TypeError):
+            max_pr_commits = 100
+
+        try:
+            pr_timeout_seconds = float(os.getenv("PATCHGUARD_PR_TIMEOUT_SECONDS", "60.0"))
+        except (ValueError, TypeError):
+            pr_timeout_seconds = 60.0
+
         return cls(
             host=host,
             port=port,
@@ -49,5 +61,7 @@ class APIConfig:
             allowed_repos_root=allowed_repos_root,
             models_dir=models_dir,
             default_threshold=0.35,
-            git_timeout_seconds=30.0
+            git_timeout_seconds=30.0,
+            max_pr_commits=max_pr_commits,
+            pr_timeout_seconds=pr_timeout_seconds
         )

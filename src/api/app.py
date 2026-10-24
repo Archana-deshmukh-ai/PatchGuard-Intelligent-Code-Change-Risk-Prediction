@@ -15,6 +15,8 @@ from .schemas import (
     ReadyResponse,
     CommitPredictionRequest,
     CommitPredictionResponse,
+    PRPredictionRequest,
+    PRPredictionResponse,
     ErrorResponse
 )
 from .service import (
@@ -176,7 +178,53 @@ def create_app(
         )
         return result
 
+    @app.post(
+        "/v1/predictions/pr",
+        response_model=PRPredictionResponse,
+        summary="Predict Pull Request Defect Risk",
+        tags=["Predictions"],
+        status_code=status.HTTP_200_OK,
+        dependencies=[Depends(verify_api_key)],
+        responses={
+            status.HTTP_400_BAD_REQUEST: {"model": ErrorResponse},
+            status.HTTP_401_UNAUTHORIZED: {"model": ErrorResponse},
+            status.HTTP_403_FORBIDDEN: {"model": ErrorResponse},
+            status.HTTP_404_NOT_FOUND: {"model": ErrorResponse},
+            422: {"model": ErrorResponse},
+            status.HTTP_500_INTERNAL_SERVER_ERROR: {"model": ErrorResponse},
+            status.HTTP_503_SERVICE_UNAVAILABLE: {"model": ErrorResponse},
+            status.HTTP_504_GATEWAY_TIMEOUT: {"model": ErrorResponse}
+        }
+    )
+    async def predict_pr(
+        request_body: PRPredictionRequest,
+        svc: PredictionService = Depends(get_service)
+    ) -> PRPredictionResponse:
+        """
+        Predicts defect risk across all constituent commits introduced by a Pull Request
+        using the production Logistic Regression model at locked threshold 0.35.
+        Bypasses qualitative LLM analysis for pure ML prediction performance.
+        """
+        start_time = time.perf_counter()
+        result = svc.predict_pr(
+            repository=request_body.repository,
+            base_ref=request_body.base_ref,
+            head_ref=request_body.head_ref
+        )
+        duration_ms = (time.perf_counter() - start_time) * 1000.0
+        logger.info(
+            "PR prediction completed: repo=%s base=%s head=%s commits=%d defect_prone=%d duration_ms=%.2f",
+            request_body.repository,
+            request_body.base_ref,
+            request_body.head_ref,
+            result.pr.commit_count,
+            result.summary.defect_prone_commits,
+            duration_ms
+        )
+        return result
+
     return app
+
 
 
 # Default app instance for ASGI servers (uvicorn src.api.app:app)

@@ -21,6 +21,11 @@ from src.engine.exceptions import (
     InvalidFeatureValueError,
     ModelError
 )
+from src.analysis.exceptions import (
+    InvalidPRRefError,
+    PRWorkloadLimitExceededError,
+    PRAnalysisTimeoutError
+)
 from .service import (
     ForbiddenRepositoryAccessError,
     ServiceNotReadyError,
@@ -157,6 +162,46 @@ def register_error_handlers(app: FastAPI) -> None:
                 }
             }
         )
+
+    @app.exception_handler(InvalidPRRefError)
+    async def invalid_pr_ref_handler(request: Request, exc: InvalidPRRefError):
+        return JSONResponse(
+            status_code=400,
+            content={
+                "error": {
+                    "code": "INVALID_PR_REF",
+                    "message": _sanitize_message(str(exc)),
+                    "remediation": "Verify that base and head references exist, are unambiguous, and share a common ancestor."
+                }
+            }
+        )
+
+    @app.exception_handler(PRWorkloadLimitExceededError)
+    async def pr_workload_limit_handler(request: Request, exc: PRWorkloadLimitExceededError):
+        return JSONResponse(
+            status_code=400,
+            content={
+                "error": {
+                    "code": "PR_WORKLOAD_LIMIT_EXCEEDED",
+                    "message": _sanitize_message(str(exc)),
+                    "remediation": "Rebase or squash PR commits, or evaluate constituent commits individually using /v1/predictions/commit."
+                }
+            }
+        )
+
+    @app.exception_handler(PRAnalysisTimeoutError)
+    async def pr_timeout_handler(request: Request, exc: PRAnalysisTimeoutError):
+        return JSONResponse(
+            status_code=504,
+            content={
+                "error": {
+                    "code": "PR_ANALYSIS_TIMEOUT",
+                    "message": _sanitize_message(str(exc)),
+                    "remediation": "Pull Request evaluation exceeded the maximum execution time budget. Reduce the commit count or evaluate individually."
+                }
+            }
+        )
+
 
     @app.exception_handler(ServiceNotReadyError)
     async def service_not_ready_handler(request: Request, exc: ServiceNotReadyError):

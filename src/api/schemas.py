@@ -2,7 +2,7 @@
 Pydantic v2 schemas and data transfer objects for PatchGuard REST API.
 """
 
-from typing import Dict, Union, Any
+from typing import Dict, Union, Any, List, Optional
 from pydantic import BaseModel, Field, ConfigDict
 
 
@@ -110,3 +110,87 @@ class ErrorDetails(BaseModel):
 class ErrorResponse(BaseModel):
     """Standard structured error response format."""
     error: ErrorDetails
+
+
+class PRPredictionRequest(BaseModel):
+    """
+    Request schema for Pull Request defect risk prediction.
+    Strictly forbids client-supplied threshold overrides.
+    """
+    model_config = ConfigDict(extra="forbid")
+
+    repository: str = Field(
+        ...,
+        description="Target repository identifier relative to permitted root",
+        min_length=1,
+        max_length=255,
+        pattern=r"^[a-zA-Z0-9_\-\.]+$"
+    )
+    base_ref: str = Field(
+        ...,
+        description="Base Git reference or branch (e.g. 'main', commit SHA)",
+        min_length=1,
+        max_length=100,
+        pattern=r"^[a-zA-Z0-9_][a-zA-Z0-9_\-\.\/]*$"
+    )
+    head_ref: str = Field(
+        ...,
+        description="Head Git reference or branch (e.g. 'feature-branch', commit SHA)",
+        min_length=1,
+        max_length=100,
+        pattern=r"^[a-zA-Z0-9_][a-zA-Z0-9_\-\.\/]*$"
+    )
+
+
+class PRMetadata(BaseModel):
+    """Metadata regarding the evaluated Pull Request."""
+    repository: str = Field(..., description="Target repository identifier")
+    base_ref: str = Field(..., description="User-supplied base Git reference")
+    head_ref: str = Field(..., description="User-supplied head Git reference")
+    resolved_base_sha: str = Field(..., description="Full 40-character base commit SHA")
+    resolved_head_sha: str = Field(..., description="Full 40-character head commit SHA")
+    resolved_merge_base_sha: str = Field(..., description="Full 40-character merge-base commit SHA")
+    is_empty: bool = Field(..., description="True if no new commits are introduced by PR")
+    commit_count: int = Field(..., description="Number of constituent commits introduced by PR")
+
+
+class PRCommitRecord(BaseModel):
+    """Per-commit prediction and provenance within a Pull Request."""
+    commit_hash: str = Field(..., description="Abbreviated commit SHA")
+    full_hash: str = Field(..., description="Full 40-character commit SHA")
+    author: str = Field(..., description="Commit author name")
+    timestamp: str = Field(..., description="Commit author timestamp")
+    commit_message: str = Field(..., description="Commit message")
+    is_merge_commit: bool = Field(..., description="True if commit has multiple parents")
+    prediction: Optional[PredictionData] = Field(default=None, description="ML risk prediction if analyzed")
+    model_signals: Optional[ModelSignalsData] = Field(default=None, description="Feature signals if analyzed")
+    features: Optional[Dict[str, Union[int, float]]] = Field(default=None, description="Canonical features if analyzed")
+    error: Optional[str] = Field(default=None, description="Error message if prediction skipped or failed")
+
+
+class PRSummaryStats(BaseModel):
+    """Quantitative summary statistics across PR constituent commits."""
+    total_commits: int = Field(..., description="Total constituent commits in PR")
+    analyzed_commits: int = Field(..., description="Commits successfully evaluated by ML engine")
+    defect_prone_commits: int = Field(..., description="Commits with risk score >= decision threshold")
+    standard_risk_commits: int = Field(..., description="Commits with risk score < decision threshold")
+    merge_commits: int = Field(..., description="Merge commits excluded from risk prediction")
+    skipped_commits: int = Field(..., description="Commits skipped due to errors")
+    max_commit_risk_score: Optional[float] = Field(default=None, description="Maximum risk score across analyzed commits")
+    decision_threshold: float = Field(..., description="Locked production decision threshold")
+
+
+class PRPredictionResponse(BaseModel):
+    """Standard response payload for Pull Request defect risk prediction."""
+    pr: PRMetadata
+    summary: PRSummaryStats
+    commits: List[PRCommitRecord]
+    provenance: ProvenanceData
+    analysis_disclaimer: str = Field(
+        default=(
+            "PatchGuard PR analysis preserves per-commit ML defect predictions and evaluates "
+            "constituent commits against the production threshold. It does NOT generate a fabricated "
+            "PR-wide risk probability score."
+        ),
+        description="Governance disclaimer confirming no fabricated aggregate PR probability is computed"
+    )

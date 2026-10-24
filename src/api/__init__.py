@@ -8,6 +8,11 @@ from .schemas import (
     ReadyResponse,
     CommitPredictionRequest,
     CommitPredictionResponse,
+    PRPredictionRequest,
+    PRPredictionResponse,
+    PRMetadata,
+    PRCommitRecord,
+    PRSummaryStats,
     ErrorResponse
 )
 from .service import (
@@ -30,5 +35,10 @@ __all__ = [
     "ReadyResponse",
     "CommitPredictionRequest",
     "CommitPredictionResponse",
+    "PRPredictionRequest",
+    "PRPredictionResponse",
+    "PRMetadata",
+    "PRCommitRecord",
+    "PRSummaryStats",
     "ErrorResponse"
 ]

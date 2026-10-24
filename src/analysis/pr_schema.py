@@ -64,6 +64,47 @@ class PRAnalysisResult:
         "PR-wide risk probability score."
     )
 
+    def get_summary_stats(self, threshold: float = 0.35) -> Dict[str, Any]:
+        """
+        Computes summary counts from constituent PRCommitPrediction records.
+        Strictly preserves individual commit metrics and does NOT compute
+        a fabricated PR-wide probability or risk score.
+        """
+        total = len(self.commits)
+        analyzed = 0
+        defect_prone = 0
+        standard_risk = 0
+        merge_count = 0
+        skipped_count = 0
+        max_risk_score: Optional[float] = None
+
+        for c in self.commits:
+            if c.is_merge_commit:
+                merge_count += 1
+            elif c.prediction is not None:
+                analyzed += 1
+                prob = c.prediction.raw_probability
+                if max_risk_score is None or prob > max_risk_score:
+                    max_risk_score = prob
+
+                if c.prediction.is_above_threshold:
+                    defect_prone += 1
+                else:
+                    standard_risk += 1
+            else:
+                skipped_count += 1
+
+        return {
+            "total_commits": total,
+            "analyzed_commits": analyzed,
+            "defect_prone_commits": defect_prone,
+            "standard_risk_commits": standard_risk,
+            "merge_commits": merge_count,
+            "skipped_commits": skipped_count,
+            "max_commit_risk_score": max_risk_score,
+            "decision_threshold": threshold
+        }
+
     def to_dict(self) -> Dict[str, Any]:
         return {
             "repo_path": self.repo_path,

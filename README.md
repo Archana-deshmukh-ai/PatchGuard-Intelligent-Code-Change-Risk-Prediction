@@ -242,6 +242,11 @@ docker run -d --name patchguard-api -p 127.0.0.1:8000:8000 -v /path/to/repositor
 curl -X POST http://127.0.0.1:8000/v1/predictions/commit \
   -H "Content-Type: application/json" \
   -d '{"repository": "my_project", "commit_hash": "HEAD"}'
+
+# 20. Run Pull Request multi-commit risk prediction via REST API (Phase 11.1A)
+curl -X POST http://127.0.0.1:8000/v1/predictions/pr \
+  -H "Content-Type: application/json" \
+  -d '{"repository": "my_project", "base_ref": "main", "head_ref": "feature/change"}'
 ```
 
 ---
@@ -403,3 +408,4 @@ Phase 10.5 introduces operational hardening across the inference engine, API ser
 - [x] **Phase 10.3: Docker Containerization & Verification** — Multi-stage Dockerfile (python:3.12-slim), non-root user (10001), Git CLI, health check, volume-mount design, docker-compose.yml.
 - [x] **Phase 10.4: CI/CD & Deployment Readiness** — Automated GitHub Actions CI workflow (`.github/workflows/ci.yml`), automated testing gates, and deployment readiness.
 - [x] **Phase 10.5: Deployment Hardening & Operational Readiness** — Bounded Git timeouts (30.0s), sanitized structured logging & traceback redaction, readiness repository root validation, CI security assertions (401/403), request duration observability, wildcard bind security warning.
+- [x] **Phase 11.1A: REST API PR Evaluation Endpoint** — Additive `POST /v1/predictions/pr` endpoint, Git ref security, repository containment, workload limit (`max_pr_commits=100`), timeout deadline (`pr_timeout_seconds=60.0`), offline ML prediction preserving per-commit results without fabricated PR scores.

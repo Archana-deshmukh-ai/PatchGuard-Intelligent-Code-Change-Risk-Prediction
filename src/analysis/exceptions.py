@@ -29,6 +29,14 @@ class PRAnalysisError(AnalysisError):
     pass
 
 class InvalidPRRefError(PRAnalysisError):
-    """Raised when base or head ref is invalid or no merge-base exists."""
+    """Raised when base or head ref is invalid, ambiguous, or no merge-base exists."""
+    pass
+
+class PRWorkloadLimitExceededError(PRAnalysisError):
+    """Raised when the number of constituent commits exceeds the configured workload limit."""
+    pass
+
+class PRAnalysisTimeoutError(PRAnalysisError):
+    """Raised when Pull Request analysis exceeds the execution time budget."""
     pass
 

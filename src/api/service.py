@@ -3,14 +3,20 @@ Prediction service business logic and repository access validation for PatchGuar
 """
 
 import os
-from typing import Optional, Dict, Any
+import time
+import datetime
+from typing import Optional, Dict, Any, List
 
 from src.engine import RiskPredictionEngine, PredictionResult
 from src.engine.exceptions import (
     PatchGuardError,
     RepositoryNotFoundError,
+    InvalidGitRepositoryError,
     ModelError
 )
+from src.analysis.pr_analyzer import PRAnalyzer
+from src.analysis.analyzer import NullLLMAnalyzer
+from src.analysis.exceptions import InvalidPRRefError
 from .config import APIConfig
 from .schemas import (
     ReadyResponse,
@@ -18,12 +24,36 @@ from .schemas import (
     CommitMetadata,
     PredictionData,
     ModelSignalsData,
-    ProvenanceData
+    ProvenanceData,
+    PRPredictionResponse,
+    PRMetadata,
+    PRCommitRecord,
+    PRSummaryStats
 )
 
 EXPECTED_MODEL_HASH = "a32b30dff63b3a85c3fd9d9983921d5f5c5c5629acc9c206f77759c46f60f387"
 EXPECTED_SCALER_HASH = "c8e65f768dab97acf8df573da60f6b1c0e9232ebf2173677f88e3efa5c479b49"
 PRODUCTION_THRESHOLD = 0.35
+
+
+def validate_git_ref(ref: str, field_name: str = "reference") -> None:
+    """
+    Validates that a Git reference does not attempt option injection,
+    ambiguity, or contain characters/sequences forbidden by Git conventions.
+    """
+    cleaned = ref.strip() if ref else ""
+    if not cleaned:
+        raise InvalidPRRefError(f"Git {field_name} cannot be empty.")
+    if cleaned.startswith("-"):
+        raise InvalidPRRefError(f"Invalid {field_name} '{cleaned}': references cannot start with a hyphen.")
+    if any(c.isspace() or ord(c) < 32 or ord(c) == 127 for c in cleaned):
+        raise InvalidPRRefError(f"Invalid {field_name} '{cleaned}': reference contains illegal whitespace or control characters.")
+    for bad in ["..", "@{", ":", "^", "~", "?", "*", "[", "\\", "//"]:
+        if bad in cleaned:
+            raise InvalidPRRefError(f"Invalid {field_name} '{cleaned}': reference contains prohibited sequence '{bad}'.")
+    if cleaned.endswith("/") or cleaned.endswith("."):
+        raise InvalidPRRefError(f"Invalid {field_name} '{cleaned}': reference cannot end with a slash or dot.")
+
 
 
 class ServiceNotReadyError(PatchGuardError):
@@ -139,7 +169,7 @@ class PredictionService:
                 "Access denied: target path escapes permitted repository workspace."
             )
 
-        if not os.path.exists(target_path):
+        if not os.path.exists(target_path) or not os.path.isdir(target_path):
             raise RepositoryNotFoundError(
                 f"Repository '{repo_clean}' does not exist in permitted directory."
             )
@@ -187,4 +217,120 @@ class PredictionService:
                 model_artifact_hash=result.model_artifact_hash,
                 scaler_artifact_hash=result.scaler_artifact_hash
             )
+        )
+
+    def predict_pr(
+        self,
+        repository: str,
+        base_ref: str,
+        head_ref: str
+    ) -> PRPredictionResponse:
+        """
+        Executes Pull Request defect risk prediction across constituent commits
+        using production engine at locked threshold 0.35.
+        Bypasses qualitative LLM analysis for pure ML prediction performance.
+        """
+        # 1. Readiness check (validates engine initialization and artifact hashes)
+        self.check_readiness()
+
+        # 2. Repository validation and path containment
+        resolved_repo_path = self.resolve_repository_path(repository)
+
+        # 3. Git reference validation (prohibiting leading hyphens, control chars, illegal syntax)
+        validate_git_ref(base_ref, "base_ref")
+        validate_git_ref(head_ref, "head_ref")
+
+        # 4. Enforce overall execution deadline and workload limits
+        start_time = time.perf_counter()
+        deadline = start_time + self.config.pr_timeout_seconds
+
+        pr_analyzer = PRAnalyzer(
+            predictor=self.engine,
+            llm_analyzer=NullLLMAnalyzer(),
+            max_commits=self.config.max_pr_commits,
+            timeout=self.config.git_timeout_seconds
+        )
+
+        pr_result = pr_analyzer.analyze_pr(
+            repo_path=resolved_repo_path,
+            base_ref=base_ref,
+            head_ref=head_ref,
+            threshold=PRODUCTION_THRESHOLD,
+            deadline=deadline
+        )
+
+        # 5. Extract summary stats directly from domain result
+        summary_data = pr_result.get_summary_stats(threshold=PRODUCTION_THRESHOLD)
+
+        # 6. Build commit prediction records
+        commit_records: List[PRCommitRecord] = []
+        for c in pr_result.commits:
+            if c.prediction is not None:
+                p = c.prediction
+                pred_data = PredictionData(
+                    raw_probability=p.raw_probability,
+                    is_above_threshold=p.is_above_threshold,
+                    decision_threshold=p.decision_threshold,
+                    prediction_label=p.prediction_label,
+                    risk_level=p.risk_level,
+                    presentation_disclaimer=p.presentation_disclaimer
+                )
+                signals_data = ModelSignalsData(
+                    top_positive_factors=p.model_signals.top_positive_factors,
+                    top_negative_factors=p.model_signals.top_negative_factors,
+                    log_odds_contributions=p.model_signals.log_odds_contributions
+                )
+                features_data = p.features
+            else:
+                pred_data = None
+                signals_data = None
+                features_data = None
+
+            commit_records.append(PRCommitRecord(
+                commit_hash=c.commit_hash,
+                full_hash=c.full_hash,
+                author=c.author,
+                timestamp=c.timestamp,
+                commit_message=c.commit_message,
+                is_merge_commit=c.is_merge_commit,
+                prediction=pred_data,
+                model_signals=signals_data,
+                features=features_data,
+                error=c.error
+            ))
+
+        eng = self.engine
+        timestamp_utc = datetime.datetime.now(datetime.timezone.utc).isoformat()
+
+        return PRPredictionResponse(
+            pr=PRMetadata(
+                repository=repository,
+                base_ref=pr_result.base_ref,
+                head_ref=pr_result.head_ref,
+                resolved_base_sha=pr_result.resolved_base_sha,
+                resolved_head_sha=pr_result.resolved_head_sha,
+                resolved_merge_base_sha=pr_result.resolved_merge_base_sha,
+                is_empty=pr_result.is_empty,
+                commit_count=pr_result.commit_count
+            ),
+            summary=PRSummaryStats(
+                total_commits=summary_data["total_commits"],
+                analyzed_commits=summary_data["analyzed_commits"],
+                defect_prone_commits=summary_data["defect_prone_commits"],
+                standard_risk_commits=summary_data["standard_risk_commits"],
+                merge_commits=summary_data["merge_commits"],
+                skipped_commits=summary_data["skipped_commits"],
+                max_commit_risk_score=summary_data["max_commit_risk_score"],
+                decision_threshold=PRODUCTION_THRESHOLD
+            ),
+            commits=commit_records,
+            provenance=ProvenanceData(
+                model_id=eng.MODEL_ID,
+                model_version=eng.MODEL_VERSION,
+                feature_schema_version=eng.FEATURE_SCHEMA_VERSION,
+                prediction_timestamp=timestamp_utc,
+                model_artifact_hash=eng.model_artifact_hash,
+                scaler_artifact_hash=eng.scaler_artifact_hash
+            ),
+            analysis_disclaimer=pr_result.analysis_disclaimer
         )

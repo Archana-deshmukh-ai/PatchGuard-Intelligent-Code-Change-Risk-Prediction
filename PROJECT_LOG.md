@@ -6,25 +6,27 @@
 The long-term goal of PatchGuard is to build a real-world software engineering bug-risk prediction system. The final architecture will analyze code changes (Git commits / Pull Requests), predict bug probability using Machine Learning, provide LLM-driven risk explanations, leverage RAG over repository documentation/issues/PR history, and integrate into developer CI/CD workflows to give actionable recommendations.
 
 ## Current Stage
-**Phase 10.5 Complete — Deployment Hardening & Operational Readiness Implemented and Verified**
+**Phase 11.1A Complete: REST API PR Evaluation Endpoint Implemented & Verified (Awaiting User Review & Commit Authorization)**
 
 
 ### Handoff Guide for Future AI / Developer Sessions
 > [!IMPORTANT]
-> **Phase 10.5 (Deployment Hardening & Operational Readiness) is COMPLETE and VERIFIED in working tree**.
+> **Phase 11.1A (REST API PR Evaluation Endpoint) is COMPLETE and FULLY VERIFIED LOCALLY**.
+>
+> **Verified Checkpoint**:
+> - Git baseline: `7dc46f5b05f09c47975998548f67edeae6c8051a` (`Fix CI secret scanner test fixture`).
+> - Endpoint implemented: `POST /v1/predictions/pr` in `src/api/` and `src/analysis/`.
+> - Active test suite status: 275 tests passed in full regression run across all 12 modules (`Ran 275 tests in 648.316s, OK (skipped=1)`). In `tests/test_api.py`, 41/41 tests pass (40 OK, 1 skipped for Windows non-elevated symlink).
+> - Production model artifacts (`models/logistic_regression_real.pkl` and `models/real_data_scaler.pkl`), locked threshold `0.35`, and canonical feature schema `v1.0-10features` remain 100% preserved and untouched (SHA-256 verified).
+> - Strict Git ref safety, canonical repository containment, workload limits (`max_pr_commits=100`), timeout deadlines (`pr_timeout_seconds=60.0`), and zero-LLM quantitative-only pass-through (`NullLLMAnalyzer`) are fully enforced.
 >
 > When resuming development in a future session:
 > 1. First inspect [`README.md`](file:///c:/Projects/CODE_project/bug-prediction/README.md), [`PROJECT_LOG.md`](file:///c:/Projects/CODE_project/bug-prediction/PROJECT_LOG.md), [`.github/workflows/ci.yml`](file:///c:/Projects/CODE_project/bug-prediction/.github/workflows/ci.yml), `git status`, and `git log`.
-> 2. Understand that Phase 10.5 implements end-to-end operational hardening:
->    - Bounded Git subprocess timeouts (`timeout: Optional[float] = 30.0`) in `src/git_extractor.py` preventing hanging child processes.
->    - Sanitized structured error logging in `src/api/error_handlers.py` redacting credentials, tokens, authorization headers, raw diffs, and filesystem paths in 500 error messages and tracebacks.
->    - Repository root directory validation in `/ready` probe (`src/api/service.py`) returning standard HTTP 503 (`SERVICE_NOT_READY`) when missing or invalid.
->    - Live container CI security assertions in `.github/workflows/ci.yml` verifying HTTP 401 unauthenticated rejection and HTTP 403 path traversal rejection.
->    - Request duration and operational prediction metadata observability in `POST /v1/predictions/commit`.
->    - Actionable startup security warning in ASGI lifespan when binding wildcard interface (`0.0.0.0`/`::`) without an API key.
->    - Environment variable forwarding `PATCHGUARD_API_KEY: ${PATCHGUARD_API_KEY:-}` in `docker-compose.yml`.
-> 3. Active test suite status: 267 total tests discovered across 13 test modules; 257 non-benchmark unit tests pass 100% offline with zero failures and zero errors (all 12 approved modules: `tests.test_analysis_pipeline`=24, `tests.test_analysis_schema`=11, `tests.test_api`=23, `tests.test_cli`=9, `tests.test_dashboard`=77, `tests.test_diff_extractor`=17, `tests.test_github_integration`=23, `tests.test_github_workflow`=16, `tests.test_openai_provider`=8, `tests.test_pr_analyzer`=11, `tests.test_prediction_engine`=12, `tests.test_repository_acquisition`=23).
-> 4. The production model artifacts (`models/logistic_regression_real.pkl` and `models/real_data_scaler.pkl`), locked threshold 0.35, and canonical feature schema `v1.0-10features` remain 100% preserved and untouched (SHA-256 verified).
+> 2. Understand that Phase 11.1A adds the multi-commit PR defect risk prediction endpoint:
+>    - `POST /v1/predictions/pr` evaluates each constituent commit in `base_ref..head_ref` using the production ML model.
+>    - Governance rule strictly enforced: No uncalibrated aggregate PR probability or average risk score is fabricated. Reports individual commit predictions and maximum commit risk score.
+>    - Decoupled domain summary statistics computation via `PRAnalysisResult.get_summary_stats()` eliminates UI dependencies.
+> 3. Production model artifacts (`models/logistic_regression_real.pkl` and `models/real_data_scaler.pkl`), locked threshold 0.35, and canonical feature schema `v1.0-10features` remain 100% preserved and untouched (SHA-256 verified).
 >
 > **Long-Term Roadmap**:
 > 1. Project & ML Foundation — **COMPLETE**
@@ -43,12 +45,136 @@ The long-term goal of PatchGuard is to build a real-world software engineering b
 > 14. Productionization: REST API & Automated Tests (Phase 10.2) — **COMPLETE**
 > 15. Productionization: Docker Containerization & Verification (Phase 10.3) — **COMPLETE & HARDENED**
 > 16. Productionization: CI/CD & Deployment Readiness (Phase 10.4) — **COMPLETE**
-> 17. **Productionization: Deployment Hardening & Operational Readiness (Phase 10.5) — COMPLETE**
+> 17. Productionization: Deployment Hardening & Operational Readiness (Phase 10.5) — **COMPLETE & CI-VERIFIED**
+> 18. **REST API Expansion for PR Evaluation (Phase 11.1A) — COMPLETE & VERIFIED**
+> 19. REST API Expansion for Qualitative Analysis (Phase 11.1B) — PLANNED
 >
 >
 > ---
 >
-> ## Phase 10.5 Deployment Hardening & Operational Readiness
+> ## Phase 11.0 Roadmap & Planning: REST API Expansion (HISTORICAL PROPOSAL)
+>
+> **Status: HISTORICAL PLANNING (Original Proposal; Endpoint 1 implemented and refined in Phase 11.1A; Endpoint 2 planned in Phase 11.1B)**
+>
+> Comprehensive architectural planning and technical roadmap for Phase 11 REST API expansion, establishing endpoint specifications, acceptance criteria, test strategies, and risk mitigations prior to implementation.
+>
+> *(Note: The architectural proposal below documents the original planning baseline. Endpoint 1 was subsequently implemented and refined in Phase 11.1A using `src/analysis/pr_analyzer.py` and the canonical `PRSummaryStats` response model).*
+>
+> ### 1. OBJECTIVE & ARCHITECTURAL MOTIVATION
+> - Expand the production REST API layer (`src/api/`) to expose PatchGuard's core multi-commit Pull Request evaluation (`src/analysis/pr_analyzer.py`) and qualitative LLM code-change analysis (`src/analysis/pipeline.py`) capabilities over HTTP.
+> - Build upon the hardened FastAPI infrastructure established in Phase 10.2 and Phase 10.5 without duplicating underlying domain logic.
+> - Maintain strict separation between quantitative ML defect prediction and qualitative LLM explanation.
+>
+> ### 2. PLANNED DELIVERABLES & ENDPOINT SPECIFICATIONS
+> - **Endpoint 1: `POST /v1/predictions/pr` (Implemented in Phase 11.1A)**
+>   - **Purpose**: Multi-commit defect prediction and cumulative code-change risk metrics for a Git Pull Request or branch comparison.
+>   - **Request Payload**:
+>     - `repository` (string, path-validated against allowed root)
+>     - `base_ref` (string, e.g. `main` or base commit SHA)
+>     - `head_ref` (string, e.g. `feature-branch` or head commit SHA)
+>     - Model config `extra="forbid"` to strictly reject client threshold overrides.
+>   - **Domain Integration (Original Proposal)**: Proposed wrapping `PRAnalyzer.analyze_local_pr()`; implemented in Phase 11.1A via `src/analysis/pr_analyzer.py` (`PRAnalyzer.analyze_pr()`) with `NullLLMAnalyzer` and `PRAnalysisResult.get_summary_stats()`.
+>   - **Response Payload**:
+>     - Per-commit defect predictions (`commit_hash`, `risk_score`, `risk_level`, `model_signals`, `features`).
+>     - Summary metrics (`total_commits`, `analyzed_commits`, `defect_prone_commits`, `standard_risk_commits`, `merge_commits`, `skipped_commits`, `max_commit_risk_score`, `decision_threshold`).
+>     - Model provenance and metadata (`model_id`, `threshold=0.35`, `schema_version="v1.0-10features"`, `artifact_hashes`).
+>   - **Governance Safeguard**: Strictly refuses to compute uncalibrated average probabilities across commits; reports individual commit risks and maximum commit risk score.
+>
+> - **Endpoint 2: `POST /v1/analysis/commit`**
+>   - **Purpose**: Qualitative LLM-driven code change risk explanation, suspected bug categories, and actionable mitigation guidance for a single commit.
+>   - **Request Payload**:
+>     - `repository` (string, path-validated against allowed root)
+>     - `commit_hash` (string, default `HEAD`)
+>     - Optional provider configuration parameters.
+>     - Model config `extra="forbid"`.
+>   - **Domain Integration**: Directly wraps existing `AnalysisPipeline.analyze_commit()` from `src/analysis/pipeline.py`.
+>   - **Response Payload**:
+>     - Structured explanation (`summary`, `risk_level`, `suspected_bug_categories`, `mitigation_recommendations`).
+>     - Commit metadata and analysis execution duration.
+>   - **Security & Privacy Boundary**: Bounded 30.0s Git subprocess and LLM call timeouts; diff credential scrubbing preventing accidental token leaks in prompt payloads.
+>
+> ### 3. ACCEPTANCE CRITERIA
+> - **Input Validation**: Strict Pydantic v2 request models with regex-validated repository names, valid Git revision formats, and explicit rejection of client threshold overrides (`HTTP 422 VALIDATION_ERROR`).
+> - **Containment & Security**: Uniform enforcement of `canonical_root` directory boundary checks, dot-reference rejection, and constant-time API key verification (`PATCHGUARD_API_KEY`).
+> - **Error Handling**: Comprehensive mapping of domain exceptions to standard HTTP error codes (`400`, `401`, `403`, `404`, `422`, `500`, `503`) with sensitive information and filesystem paths redacted from tracebacks.
+> - **Operational Observability**: Request execution timing and structured operational logs without logging raw diffs, source code, or credentials.
+> - **Artifact Immutability**: Production model weights (`models/logistic_regression_real.pkl`), scaler (`models/real_data_scaler.pkl`), locked threshold `0.35`, and canonical 10-feature schema remain 100% untouched.
+> - **Test Suite Integrity**: Zero regressions across existing 257 non-benchmark unit tests.
+>
+> ### 4. TEST STRATEGY
+> - Author dedicated test cases in `tests/test_api.py` using `fastapi.testclient.TestClient`.
+> - Utilize isolated mock fixtures (`unittest.mock`) for Git operations and LLM provider calls, guaranteeing 100% offline, deterministic execution.
+> - Verify success paths, schema edge cases, unauthenticated requests (HTTP 401), path traversal attacks (HTTP 403), invalid/missing branches (HTTP 404), empty PRs (HTTP 400), and unready service states (HTTP 503).
+> - Keep unit test execution fast (<2 seconds per module).
+>
+> ### 5. RISK CONSIDERATIONS & ROLLBACK PLAN
+> - **Risks**:
+>   - Large multi-commit PRs or massive diffs could cause memory spikes or Git subprocess timeouts.
+>   - External LLM provider latency, rate limiting, or network unavailability.
+> - **Mitigations**:
+>   - Enforced 30.0s timeouts on all child subprocesses and external provider requests.
+>   - Architecture decoupling: `POST /v1/predictions/pr` operates purely with local ML inference, completely independent of external LLM availability.
+> - **Rollback Plan**:
+>   - Phase 11.1 endpoints are strictly additive. If regressions or operational issues occur, new routes can be rolled back cleanly to checkpoint commit `7dc46f5` with zero disruption to existing endpoints (`/health`, `/ready`, `/v1/predictions/commit`).
+>
+>
+> ---
+
+## Phase 11.1A REST API PR Evaluation Endpoint Implementation
+
+Completed Phase 11.1A (REST API PR Evaluation Endpoint), implementing the additive REST API endpoint `POST /v1/predictions/pr` for evaluating defect risk across all constituent commits of a Git Pull Request or branch comparison.
+
+### 1. IMPLEMENTED COMPONENTS & DESIGN DECISIONS
+- **Additive Endpoint `POST /v1/predictions/pr` (`src/api/app.py`, `src/api/service.py`)**:
+  - Implemented `POST /v1/predictions/pr` protected with optional API key authentication (`verify_api_key`), readiness check (`check_readiness`), and sanitized execution logging with duration metrics.
+  - Wraps existing `PRAnalyzer` from `src/analysis/pr_analyzer.py` via `PredictionService.predict_pr()`.
+  - Maps domain results to Pydantic schemas without UI layer coupling.
+- **Git Reference Security & Ambiguity Detection (`src/api/service.py`, `src/analysis/pr_analyzer.py`)**:
+  - Validates `base_ref` and `head_ref` in Python prior to Git subprocess execution: rejects leading hyphens (`-`) to eliminate option injection, control characters, whitespace, and path traversal sequences.
+  - Enforces Pydantic regex `^[a-zA-Z0-9_][a-zA-Z0-9_\-\.\/]*$` with `extra="forbid"`.
+  - Checks Git subprocess stderr for ambiguity warnings (`ambiguous in stderr.lower()`), raising structured `InvalidPRRefError` (`HTTP 400 INVALID_PR_REF`) instead of silently selecting arbitrary Git objects.
+  - Resolves revisions to immutable 40-character commit SHAs (`resolved_base_sha`, `resolved_head_sha`, `resolved_merge_base_sha`) before range operations.
+- **Canonical Repository Containment & Validation (`src/api/service.py`)**:
+  - Resolves absolute canonical paths (`os.path.realpath`) and verifies containment within configured `allowed_repos_root`.
+  - Validates `os.path.isdir()` to prevent targeting non-directory files.
+  - Returns sanitized `HTTP 403 FORBIDDEN_REPOSITORY_ACCESS` or `HTTP 404 REPOSITORY_NOT_FOUND` without leaking server directory paths.
+- **Workload Limit & Execution Time Budget (`src/analysis/pr_analyzer.py`, `src/api/config.py`)**:
+  - Fast-fail workload check: queries commit count via `git rev-list --count` and immediately raises `PRWorkloadLimitExceededError` (`HTTP 400 PR_WORKLOAD_LIMIT_EXCEEDED`) if commit count exceeds `max_pr_commits` (default `100`, configurable via `PATCHGUARD_MAX_PR_COMMITS`), before running any inference loops.
+  - Execution time budget: enforces deadline checks before Git operations and inference iterations, raising `PRAnalysisTimeoutError` (`HTTP 504 PR_ANALYSIS_TIMEOUT`) when elapsed time exceeds `pr_timeout_seconds` (default `60.0`, configurable via `PATCHGUARD_PR_TIMEOUT_SECONDS`).
+- **Zero-LLM Pass-Through (`NullLLMAnalyzer`) & Decoupled Summary Statistics**:
+  - Created `NullLLMAnalyzer` in `src/analysis/analyzer.py` returning `None` immediately.
+  - When `isinstance(self.llm_analyzer, NullLLMAnalyzer)`, `PRAnalyzer` completely skips cumulative diff extraction (`GitDiffExtractor`) and LLM prompt generation, guaranteeing 100% offline, pure ML inference without requiring LLM API keys.
+  - Added `PRAnalysisResult.get_summary_stats()` in `src/analysis/pr_schema.py` to compute summary metrics (`total_commits`, `analyzed_commits`, `defect_prone_commits`, `standard_risk_commits`, `merge_commits`, `skipped_commits`, `max_commit_risk_score`, `decision_threshold`) inside the domain model, eliminating any dependency between `src/api/` and `src/ui/`.
+- **Governance Invariant Preserved**:
+  - Strictly preserves per-commit ML predictions without calculating or presenting an uncalibrated average probability or fabricated aggregate PR risk score. Includes mandatory `analysis_disclaimer` field in response payload.
+- **Artifact Immutability**:
+  - Model weights (`models/logistic_regression_real.pkl`: `A32B30DFF63B3A85C3FD9D9983921D5F5C5C5629ACC9C206F77759C46F60F387`) and scaler (`models/real_data_scaler.pkl`: `C8E65F768DAB97ACF8DF573DA60F6B1C0E9232EBF2173677F88E3EFA5C479B49`) remain locked, unretrained, and verified. Locked threshold remains `0.35`.
+
+### 2. AUTOMATED TEST VERIFICATION
+- Added Section 9 to `tests/test_api.py` with 18 comprehensive unit tests:
+  - `test_pr_prediction_single_commit_success`: Validates single-commit PR prediction with 200 OK and complete response contract.
+  - `test_pr_prediction_multi_commit_success`: Validates multi-commit PR with chronological commit order.
+  - `test_pr_prediction_empty_pr_same_ref`: Validates empty PR when base equals head (`is_empty=True`, commit_count=0).
+  - `test_pr_prediction_merge_commit_handled`: Validates graceful handling and tallying of merge commits within PR.
+  - `test_pr_prediction_invalid_ref_leading_hyphen`: Rejects option-like reference syntax with 400/422.
+  - `test_pr_prediction_ambiguous_ref_detected_400`: Detects ambiguous refs matching multiple Git objects with HTTP 400 `INVALID_PR_REF`.
+  - `test_pr_prediction_nonexistent_ref_400`: Returns HTTP 400 for unresolvable branch or commit reference.
+  - `test_pr_prediction_unrelated_histories_no_merge_base_400`: Returns HTTP 400 when branches have no common ancestor.
+  - `test_pr_prediction_workload_limit_exceeded_400`: Returns HTTP 400 `PR_WORKLOAD_LIMIT_EXCEEDED` when commits exceed budget.
+  - `test_pr_prediction_overall_timeout_handling_504`: Returns HTTP 504 `PR_ANALYSIS_TIMEOUT` on exceeded execution deadline.
+  - `test_pr_prediction_zero_external_llm_calls`: Confirms 100% offline execution without external LLM API calls.
+  - `test_pr_prediction_client_threshold_override_rejected_422`: Strictly rejects client-supplied threshold override.
+  - `test_pr_prediction_authentication_enforced`: Enforces constant-time API key verification when enabled.
+  - `test_pr_prediction_service_not_ready_503`: Returns HTTP 503 when prediction engine is not initialized or unready.
+  - `test_pr_prediction_nonexistent_repository_404`: Returns HTTP 404 when repository directory does not exist.
+  - `test_pr_prediction_path_traversal_rejection_403`: Rejects directory traversal attempts.
+  - `test_pr_prediction_symlink_escape_rejection`: Rejects symlinks pointing outside permitted root (skipped on Windows without elevation).
+  - `test_pr_prediction_observability_logging`: Verifies latency and operational metadata logging without leaking diffs.
+- **Regression Suite**: Ran 275 tests across all 12 modules (`OK (skipped=1)`), confirming zero regressions.
+
+---
+
+## Phase 10.5 Deployment Hardening & Operational Readiness
 >
 > Completed Phase 10.5 (Deployment Hardening & Operational Readiness), implementing production resilience improvements, structured logging with secret and path redaction, repository readiness validation, live container security assertions in CI, and request-level prediction observability.
 >
@@ -105,6 +231,30 @@ The long-term goal of PatchGuard is to build a real-world software engineering b
 > - **Local Development**: Runs on loopback `127.0.0.1`, optional API key, local filesystem path for repositories, plain HTTP.
 > - **Production Container**: Runs inside container network (`0.0.0.0:8000`), mandatory `PATCHGUARD_API_KEY`, host repository volume mounted `:ro` to `/repositories`, TLS terminated externally via reverse proxy, unprivileged user `patchguard` (UID 10001).
 > - **Subprocess Timeouts**: Enforced 30.0s Git execution timeout prevents lingering worker processes.
+>
+> ### 6. CI SECRET SCANNER TEST FIXTURE REMEDIATION (COMMIT 7dc46f5)
+> - **CI Run #3 Finding & Diagnosis**:
+>   - Pushed Phase 10.5 in commit `c2259e13275bd171d9e5bdedcbb2ee7227d77cdc`.
+>   - GitHub Actions Run #3 (`40078028775`) failed in the `quality-and-security` job during the `Safe secret scan` step (`.github/workflows/ci.yml:60`).
+>   - Static regex `ghp_[a-zA-Z0-9]{36}` detected a dummy GitHub token literal (`("ghp_" + ("1" * 36))`) in test fixture `test_500_engine_error_logging_redaction` (`tests/test_api.py:465`).
+> - **Narrow Remediation**:
+>   - Modified only `tests/test_api.py`.
+>   - Replaced the hard-coded dummy token literal with dynamic construction: `dummy_token = "ghp_" + ("1" * 36)`.
+>   - Fully preserved the test's assertions verifying that sensitive token patterns are redacted from error logs and stack traces.
+>   - Left the secret scanner workflow step completely intact without adding test-file exemptions or weakening security gates.
+> - **Local Verification & Commit**:
+>   - Verified `python -m unittest tests/test_api.py` passed (23/23 tests).
+>   - Confirmed secret scanner passes locally.
+>   - Committed as `7dc46f5b05f09c47975998548f67edeae6c8051a` (`Fix CI secret scanner test fixture`).
+> - **Push & CI Run #4 Outcome**:
+>   - Authorized push of commit `7dc46f5` to `origin/main`.
+>   - GitHub Actions Run `#4` (`40078961278`) passed 100% in 2m 31s across all 3 jobs:
+>     - `quality-and-security`: PASS (5s)
+>     - `python-tests`: PASS (1m 4s, 257 unit tests across 12 approved modules)
+>     - `docker-verification`: PASS (~1m 20s, health/readiness probes, commit prediction, 401 unauth, 403 path traversal)
+>   - Production model and scaler hashes verified byte-identical.
+>   - Threshold locked at `0.35`, feature schema `v1.0-10features`.
+>   - Working tree completely clean and synchronized with `origin/main`.
 >
 >
 > ---

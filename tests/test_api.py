@@ -111,6 +111,31 @@ class TestPatchGuardAPI(unittest.TestCase):
         self._run_git(repo_dir, ["add", "initial.py"])
         self._run_git(repo_dir, ["commit", "-m", "Feature commit"])
 
+        # Feature single branch (1 commit ahead of main)
+        self._run_git(repo_dir, ["checkout", "-b", "feature/single"])
+        with open(file_path, "a", encoding="utf-8") as f:
+            f.write("def single_helper():\n    return 'single'\n")
+        self._run_git(repo_dir, ["add", "initial.py"])
+        self._run_git(repo_dir, ["commit", "-m", "Single PR commit"])
+
+        # Feature multi branch (2 commits ahead of main)
+        self._run_git(repo_dir, ["checkout", "main"])
+        self._run_git(repo_dir, ["checkout", "-b", "feature/multi"])
+        utils_path = os.path.join(repo_dir, "utils.py")
+        with open(utils_path, "w", encoding="utf-8") as f:
+            f.write("def util():\n    return 100\n")
+        self._run_git(repo_dir, ["add", "utils.py"])
+        self._run_git(repo_dir, ["commit", "-m", "Multi commit 1"])
+
+        with open(file_path, "a", encoding="utf-8") as f:
+            f.write("from utils import util\n")
+        self._run_git(repo_dir, ["add", "initial.py"])
+        self._run_git(repo_dir, ["commit", "-m", "Multi commit 2"])
+
+        # Return to main
+        self._run_git(repo_dir, ["checkout", "main"])
+
+
     # -------------------------------------------------------------------------
     # 1. Health Endpoint Tests
     # -------------------------------------------------------------------------
@@ -555,7 +580,494 @@ class TestPatchGuardAPI(unittest.TestCase):
         self.assertIn("score=", log_output)
         self.assertIn("duration_ms=", log_output)
 
+    # -------------------------------------------------------------------------
+    # 9. Pull Request Prediction Endpoint Tests (Phase 11.1A)
+    # -------------------------------------------------------------------------
+    def test_pr_prediction_single_commit_success(self):
+        """POST /v1/predictions/pr returns 200 OK for valid single-commit PR."""
+        response = self.client.post(
+            "/v1/predictions/pr",
+            json={
+                "repository": self.repo_name,
+                "base_ref": "main",
+                "head_ref": "feature/single"
+            }
+        )
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+
+        # PR metadata
+        self.assertEqual(data["pr"]["repository"], self.repo_name)
+        self.assertEqual(data["pr"]["base_ref"], "main")
+        self.assertEqual(data["pr"]["head_ref"], "feature/single")
+        self.assertFalse(data["pr"]["is_empty"])
+        self.assertEqual(data["pr"]["commit_count"], 1)
+        self.assertEqual(len(data["pr"]["resolved_base_sha"]), 40)
+        self.assertEqual(len(data["pr"]["resolved_head_sha"]), 40)
+        self.assertEqual(len(data["pr"]["resolved_merge_base_sha"]), 40)
+
+        # Commits list
+        self.assertEqual(len(data["commits"]), 1)
+        c = data["commits"][0]
+        self.assertEqual(c["commit_hash"], c["full_hash"][:7])
+        self.assertFalse(c["is_merge_commit"])
+        self.assertIsNone(c["error"])
+        self.assertIsNotNone(c["prediction"])
+        self.assertTrue(0.0 <= c["prediction"]["raw_probability"] <= 1.0)
+        self.assertEqual(c["prediction"]["decision_threshold"], 0.35)
+        self.assertIn(c["prediction"]["risk_level"], ["LOW", "MEDIUM", "HIGH"])
+        self.assertIsNotNone(c["model_signals"])
+        self.assertEqual(len(c["features"]), 10)
+
+        # Summary statistics
+        summary = data["summary"]
+        self.assertEqual(summary["total_commits"], 1)
+        self.assertEqual(summary["analyzed_commits"], 1)
+        self.assertEqual(summary["merge_commits"], 0)
+        self.assertEqual(summary["skipped_commits"], 0)
+        self.assertEqual(summary["decision_threshold"], 0.35)
+        self.assertEqual(summary["max_commit_risk_score"], c["prediction"]["raw_probability"])
+
+        # Provenance and governance disclaimer
+        self.assertEqual(data["provenance"]["model_id"], "logistic_regression_real")
+        self.assertIn("does NOT generate a fabricated PR-wide risk probability score", data["analysis_disclaimer"])
+
+    def test_pr_prediction_multi_commit_success(self):
+        """POST /v1/predictions/pr returns 200 OK for valid multi-commit PR with ordered commits."""
+        response = self.client.post(
+            "/v1/predictions/pr",
+            json={
+                "repository": self.repo_name,
+                "base_ref": "main",
+                "head_ref": "feature/multi"
+            }
+        )
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+
+        self.assertEqual(data["pr"]["commit_count"], 2)
+        self.assertEqual(len(data["commits"]), 2)
+        self.assertFalse(data["pr"]["is_empty"])
+
+        summary = data["summary"]
+        self.assertEqual(summary["total_commits"], 2)
+        self.assertEqual(summary["analyzed_commits"], 2)
+        expected_max = max(c["prediction"]["raw_probability"] for c in data["commits"])
+        self.assertEqual(summary["max_commit_risk_score"], expected_max)
+
+    def test_pr_prediction_empty_pr_same_ref(self):
+        """POST /v1/predictions/pr returns 200 OK with is_empty=True when base_ref == head_ref."""
+        response = self.client.post(
+            "/v1/predictions/pr",
+            json={
+                "repository": self.repo_name,
+                "base_ref": "main",
+                "head_ref": "main"
+            }
+        )
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+
+        self.assertTrue(data["pr"]["is_empty"])
+        self.assertEqual(data["pr"]["commit_count"], 0)
+        self.assertEqual(len(data["commits"]), 0)
+        self.assertEqual(data["summary"]["total_commits"], 0)
+        self.assertEqual(data["summary"]["analyzed_commits"], 0)
+        self.assertIsNone(data["summary"]["max_commit_risk_score"])
+
+    def test_pr_prediction_merge_commit_handled(self):
+        """POST /v1/predictions/pr gracefully handles and tallies merge commits within PR."""
+        # Create a branch with a merge commit
+        self._run_git(self.repo_path, ["checkout", "main"])
+        self._run_git(self.repo_path, ["checkout", "-b", "branch-a"])
+        file_a = os.path.join(self.repo_path, "file_a.py")
+        with open(file_a, "w", encoding="utf-8") as f:
+            f.write("def fa(): pass\n")
+        self._run_git(self.repo_path, ["add", "file_a.py"])
+        self._run_git(self.repo_path, ["commit", "-m", "Commit on branch-a"])
+
+        self._run_git(self.repo_path, ["checkout", "main"])
+        self._run_git(self.repo_path, ["checkout", "-b", "branch-b"])
+        file_b = os.path.join(self.repo_path, "file_b.py")
+        with open(file_b, "w", encoding="utf-8") as f:
+            f.write("def fb(): pass\n")
+        self._run_git(self.repo_path, ["add", "file_b.py"])
+        self._run_git(self.repo_path, ["commit", "-m", "Commit on branch-b"])
+
+        # Merge branch-a into branch-b
+        self._run_git(self.repo_path, ["merge", "branch-a", "--no-ff", "-m", "Merge branch-a into branch-b"])
+
+        response = self.client.post(
+            "/v1/predictions/pr",
+            json={
+                "repository": self.repo_name,
+                "base_ref": "main",
+                "head_ref": "branch-b"
+            }
+        )
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+
+        self.assertGreaterEqual(data["summary"]["merge_commits"], 1)
+        merge_commits = [c for c in data["commits"] if c["is_merge_commit"]]
+        self.assertTrue(len(merge_commits) >= 1)
+        self.assertIsNone(merge_commits[0]["prediction"])
+        self.assertIn("merge commit", merge_commits[0]["error"].lower())
+
+        # Cleanup
+        self._run_git(self.repo_path, ["checkout", "main"])
+
+    def test_pr_prediction_invalid_ref_leading_hyphen(self):
+        """POST /v1/predictions/pr rejects option-like references starting with hyphen."""
+        # Test leading hyphen on base_ref
+        response = self.client.post(
+            "/v1/predictions/pr",
+            json={
+                "repository": self.repo_name,
+                "base_ref": "--upload-pack",
+                "head_ref": "main"
+            }
+        )
+        self.assertIn(response.status_code, [400, 422])
+        err = response.json()["error"]
+        self.assertIn(err["code"], ["INVALID_PR_REF", "VALIDATION_ERROR"])
+
+        # Test leading hyphen on head_ref
+        response2 = self.client.post(
+            "/v1/predictions/pr",
+            json={
+                "repository": self.repo_name,
+                "base_ref": "main",
+                "head_ref": "-o"
+            }
+        )
+        self.assertIn(response2.status_code, [400, 422])
+
+    def test_pr_prediction_nonexistent_ref_400(self):
+        """POST /v1/predictions/pr returns HTTP 400 INVALID_PR_REF for unresolvable branch."""
+        response = self.client.post(
+            "/v1/predictions/pr",
+            json={
+                "repository": self.repo_name,
+                "base_ref": "main",
+                "head_ref": "nonexistent-branch-404"
+            }
+        )
+        self.assertEqual(response.status_code, 400)
+        data = response.json()
+        self.assertEqual(data["error"]["code"], "INVALID_PR_REF")
+        self.assertIn("Invalid head reference", data["error"]["message"])
+
+    def test_pr_prediction_ambiguous_ref_400(self):
+        """POST /v1/predictions/pr returns HTTP 400 INVALID_PR_REF when reference matches multiple Git objects."""
+        # Create a branch and tag with the same name
+        self._run_git(self.repo_path, ["branch", "ambig-ref-test"])
+        self._run_git(self.repo_path, ["tag", "ambig-ref-test"])
+        try:
+            response = self.client.post(
+                "/v1/predictions/pr",
+                json={
+                    "repository": self.repo_name,
+                    "base_ref": "main",
+                    "head_ref": "ambig-ref-test"
+                }
+            )
+            self.assertEqual(response.status_code, 400)
+            data = response.json()
+            self.assertEqual(data["error"]["code"], "INVALID_PR_REF")
+            self.assertIn("Ambiguous", data["error"]["message"])
+        finally:
+            self._run_git(self.repo_path, ["branch", "-D", "ambig-ref-test"])
+            self._run_git(self.repo_path, ["tag", "-d", "ambig-ref-test"])
+
+    def test_pr_prediction_unrelated_histories_no_merge_base_400(self):
+        """POST /v1/predictions/pr returns HTTP 400 INVALID_PR_REF when branches share no common ancestor."""
+        # Create an orphan branch with independent history
+        self._run_git(self.repo_path, ["checkout", "--orphan", "orphan-test"])
+        orphan_file = os.path.join(self.repo_path, "orphan.txt")
+        with open(orphan_file, "w", encoding="utf-8") as f:
+            f.write("orphan\n")
+        self._run_git(self.repo_path, ["add", "orphan.txt"])
+        self._run_git(self.repo_path, ["commit", "-m", "Orphan initial commit"])
+        self._run_git(self.repo_path, ["checkout", "main"])
+
+        response = self.client.post(
+            "/v1/predictions/pr",
+            json={
+                "repository": self.repo_name,
+                "base_ref": "main",
+                "head_ref": "orphan-test"
+            }
+        )
+        self.assertEqual(response.status_code, 400)
+        data = response.json()
+        self.assertEqual(data["error"]["code"], "INVALID_PR_REF")
+        self.assertIn("merge-base", data["error"]["message"].lower())
+
+    def test_pr_prediction_workload_limit_exceeded_400(self):
+        """POST /v1/predictions/pr returns HTTP 400 PR_WORKLOAD_LIMIT_EXCEEDED when commit count exceeds limit."""
+        limited_cfg = APIConfig(
+            host="127.0.0.1",
+            port=8000,
+            api_key=None,
+            allowed_repos_root=self.allowed_repos_root,
+            models_dir=self.models_dir,
+            max_pr_commits=1  # Only allow 1 commit
+        )
+        limited_svc = PredictionService(config=limited_cfg)
+        limited_app = create_app(config=limited_cfg, service=limited_svc)
+        limited_client = TestClient(limited_app)
+
+        # feature/multi has 2 commits
+        response = limited_client.post(
+            "/v1/predictions/pr",
+            json={
+                "repository": self.repo_name,
+                "base_ref": "main",
+                "head_ref": "feature/multi"
+            }
+        )
+        self.assertEqual(response.status_code, 400)
+        data = response.json()
+        self.assertEqual(data["error"]["code"], "PR_WORKLOAD_LIMIT_EXCEEDED")
+        self.assertIn("exceeds the maximum allowable limit of 1 commits", data["error"]["message"])
+
+    def test_pr_prediction_overall_timeout_handling_504(self):
+        """POST /v1/predictions/pr returns HTTP 504 PR_ANALYSIS_TIMEOUT when execution exceeds budget."""
+        timeout_cfg = APIConfig(
+            host="127.0.0.1",
+            port=8000,
+            api_key=None,
+            allowed_repos_root=self.allowed_repos_root,
+            models_dir=self.models_dir,
+            pr_timeout_seconds=0.000001  # Immediate timeout
+        )
+        timeout_svc = PredictionService(config=timeout_cfg)
+        timeout_app = create_app(config=timeout_cfg, service=timeout_svc)
+        timeout_client = TestClient(timeout_app)
+
+        response = timeout_client.post(
+            "/v1/predictions/pr",
+            json={
+                "repository": self.repo_name,
+                "base_ref": "main",
+                "head_ref": "feature/multi"
+            }
+        )
+        self.assertEqual(response.status_code, 504)
+        data = response.json()
+        self.assertEqual(data["error"]["code"], "PR_ANALYSIS_TIMEOUT")
+        self.assertIn("exceeded the maximum execution time budget", data["error"]["message"])
+
+    def test_pr_analyzer_git_subprocess_timeout_raises_pr_analysis_timeout_error(self):
+        """PRAnalyzer._run_git raises PRAnalysisTimeoutError on subprocess timeout."""
+        from src.analysis.pr_analyzer import PRAnalyzer
+        from src.analysis.exceptions import PRAnalysisTimeoutError
+        from unittest.mock import patch
+        import subprocess
+
+        analyzer = PRAnalyzer()
+        with patch("subprocess.run", side_effect=subprocess.TimeoutExpired(cmd=["git", "status"], timeout=30.0)):
+            with self.assertRaises(PRAnalysisTimeoutError) as ctx:
+                analyzer._run_git(self.repo_path, ["status"], timeout=30.0)
+            self.assertIn("Git command timed out after 30.0s: git status", str(ctx.exception))
+
+    def test_pr_prediction_git_subprocess_timeout_maps_to_504(self):
+        """POST /v1/predictions/pr maps PRAnalyzer Git subprocess timeout to HTTP 504 PR_ANALYSIS_TIMEOUT."""
+        from unittest.mock import patch
+        import subprocess
+
+        with patch("subprocess.run", side_effect=subprocess.TimeoutExpired(cmd=["git", "rev-parse"], timeout=30.0)):
+            response = self.client.post(
+                "/v1/predictions/pr",
+                json={
+                    "repository": self.repo_name,
+                    "base_ref": "main",
+                    "head_ref": "feature/single"
+                }
+            )
+            self.assertEqual(response.status_code, 504)
+            data = response.json()
+            self.assertEqual(data["error"]["code"], "PR_ANALYSIS_TIMEOUT")
+            self.assertIn("Git command timed out after 30.0s", data["error"]["message"])
+
+    def test_pr_prediction_zero_external_llm_calls(self):
+        """POST /v1/predictions/pr runs 100% offline without invoking external LLMs or requiring OPENAI_API_KEY."""
+        # Ensure OPENAI_API_KEY is not set
+        old_key = os.environ.pop("OPENAI_API_KEY", None)
+        try:
+            response = self.client.post(
+                "/v1/predictions/pr",
+                json={
+                    "repository": self.repo_name,
+                    "base_ref": "main",
+                    "head_ref": "feature/single"
+                }
+            )
+            self.assertEqual(response.status_code, 200)
+        finally:
+            if old_key is not None:
+                os.environ["OPENAI_API_KEY"] = old_key
+
+    def test_pr_prediction_client_threshold_override_rejected_422(self):
+        """POST /v1/predictions/pr strictly rejects client-supplied threshold override with HTTP 422."""
+        response = self.client.post(
+            "/v1/predictions/pr",
+            json={
+                "repository": self.repo_name,
+                "base_ref": "main",
+                "head_ref": "feature/single",
+                "threshold": 0.50
+            }
+        )
+        self.assertEqual(response.status_code, 422)
+        data = response.json()
+        self.assertEqual(data["error"]["code"], "VALIDATION_ERROR")
+        self.assertIn("extra", data["error"]["message"].lower())
+
+    def test_pr_prediction_path_traversal_rejection_403(self):
+        """POST /v1/predictions/pr rejects path traversal attempts with HTTP 403 or 422."""
+        # Relative traversal
+        response = self.client.post(
+            "/v1/predictions/pr",
+            json={"repository": "../outside", "base_ref": "main", "head_ref": "main"}
+        )
+        self.assertIn(response.status_code, [403, 422])
+
+        # Dot references
+        response2 = self.client.post(
+            "/v1/predictions/pr",
+            json={"repository": "..", "base_ref": "main", "head_ref": "main"}
+        )
+        self.assertEqual(response2.status_code, 403)
+        self.assertEqual(response2.json()["error"]["code"], "FORBIDDEN_REPOSITORY_ACCESS")
+
+    def test_pr_prediction_symlink_escape_rejection(self):
+        """Symlink pointing outside allowed repository workspace is rejected with 403."""
+        outside_dir = tempfile.mkdtemp(prefix="test_outside_")
+        symlink_path = os.path.join(self.allowed_repos_root, "symlink-repo")
+        try:
+            try:
+                os.symlink(outside_dir, symlink_path, target_is_directory=True)
+            except (OSError, NotImplementedError):
+                self.skipTest("Symlinks not supported in current environment without elevated privileges.")
+
+            response = self.client.post(
+                "/v1/predictions/pr",
+                json={
+                    "repository": "symlink-repo",
+                    "base_ref": "main",
+                    "head_ref": "main"
+                }
+            )
+            self.assertEqual(response.status_code, 403)
+            data = response.json()
+            self.assertEqual(data["error"]["code"], "FORBIDDEN_REPOSITORY_ACCESS")
+        finally:
+            if os.path.exists(symlink_path):
+                try:
+                    os.unlink(symlink_path)
+                except OSError:
+                    pass
+            if os.path.exists(outside_dir):
+                shutil.rmtree(outside_dir, ignore_errors=True)
+
+    def test_pr_prediction_authentication_enforced(self):
+        """POST /v1/predictions/pr enforces API key authentication when configured."""
+        auth_config = APIConfig(
+            host="127.0.0.1",
+            port=8000,
+            api_key="secret-api-key-xyz",
+            allowed_repos_root=self.allowed_repos_root,
+            models_dir=self.models_dir
+        )
+        auth_svc = PredictionService(config=auth_config)
+        auth_app = create_app(config=auth_config, service=auth_svc)
+        auth_client = TestClient(auth_app)
+
+        payload = {"repository": self.repo_name, "base_ref": "main", "head_ref": "feature/single"}
+
+        # Missing API Key -> 401
+        res_no_key = auth_client.post("/v1/predictions/pr", json=payload)
+        self.assertEqual(res_no_key.status_code, 401)
+        self.assertEqual(res_no_key.json()["error"]["code"], "AUTHENTICATION_REQUIRED")
+
+        # Invalid API Key -> 401
+        res_bad_key = auth_client.post(
+            "/v1/predictions/pr",
+            json=payload,
+            headers={"X-API-Key": "wrong-key"}
+        )
+        self.assertEqual(res_bad_key.status_code, 401)
+
+        # Valid API Key -> 200
+        res_valid = auth_client.post(
+            "/v1/predictions/pr",
+            json=payload,
+            headers={"X-API-Key": "secret-api-key-xyz"}
+        )
+        self.assertEqual(res_valid.status_code, 200)
+
+    def test_pr_prediction_nonexistent_repository_404(self):
+        """POST /v1/predictions/pr returns HTTP 404 REPOSITORY_NOT_FOUND when repo does not exist."""
+        response = self.client.post(
+            "/v1/predictions/pr",
+            json={
+                "repository": "nonexistent-repo",
+                "base_ref": "main",
+                "head_ref": "main"
+            }
+        )
+        self.assertEqual(response.status_code, 404)
+        data = response.json()
+        self.assertEqual(data["error"]["code"], "REPOSITORY_NOT_FOUND")
+
+    def test_pr_prediction_service_not_ready_503(self):
+        """POST /v1/predictions/pr returns HTTP 503 SERVICE_NOT_READY when prediction engine is unready."""
+        bad_config = APIConfig(
+            host="127.0.0.1",
+            port=8000,
+            allowed_repos_root=self.allowed_repos_root,
+            models_dir=os.path.join(self.workspace_dir, "nonexistent-models")
+        )
+        unready_svc = PredictionService(config=bad_config)
+        unready_app = create_app(config=bad_config, service=unready_svc)
+        unready_client = TestClient(unready_app)
+
+        response = unready_client.post(
+            "/v1/predictions/pr",
+            json={
+                "repository": self.repo_name,
+                "base_ref": "main",
+                "head_ref": "feature/single"
+            }
+        )
+        self.assertEqual(response.status_code, 503)
+        data = response.json()
+        self.assertEqual(data["error"]["code"], "SERVICE_NOT_READY")
+
+    def test_pr_prediction_observability_logging(self):
+        """POST /v1/predictions/pr logs operational execution duration and non-sensitive metrics."""
+        with self.assertLogs("patchguard.api", level="INFO") as log_capture:
+            response = self.client.post(
+                "/v1/predictions/pr",
+                json={
+                    "repository": self.repo_name,
+                    "base_ref": "main",
+                    "head_ref": "feature/single"
+                }
+            )
+
+        self.assertEqual(response.status_code, 200)
+        log_output = "\n".join(log_capture.output)
+        self.assertIn("PR prediction completed: repo=test-repo", log_output)
+        self.assertIn("base=main", log_output)
+        self.assertIn("head=feature/single", log_output)
+        self.assertIn("commits=1", log_output)
+        self.assertIn("duration_ms=", log_output)
+
     def test_production_artifacts_unmodified_after_test_suite(self):
+
         """Verifies production model and scaler artifact SHA-256 hashes are 100% identical."""
         current_model_hash = compute_file_sha256(self.model_path)
         current_scaler_hash = compute_file_sha256(self.scaler_path)

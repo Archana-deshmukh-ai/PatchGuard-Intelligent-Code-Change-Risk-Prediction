@@ -3,7 +3,7 @@ LLM Code Analysis orchestrator for Phase 6.
 Combines GitDiffExtractor, PromptBuilder, LLMProvider, ResponseParser, and EvidenceValidator.
 """
 
-from typing import Optional
+from typing import Optional, Any
 from src.analysis.diff_extractor import GitDiffExtractor, CommitDiff
 from src.analysis.schema import LLMAnalysisResult
 from src.analysis.providers import LLMProvider, MockLLMProvider
@@ -68,3 +68,17 @@ class LLMCodeAnalyzer:
         extractor = GitDiffExtractor(repo_path)
         commit_diff = extractor.extract_commit_diff(commit_ref)
         return self.analyze_commit(commit_diff, prediction_result)
+
+
+class NullLLMAnalyzer:
+    """
+    Pass-through null LLM analyzer for quantitative-only ML prediction workflows.
+    Bypasses cumulative diff extraction and external LLM provider calls.
+    """
+    def analyze_commit(
+        self,
+        commit_diff: Optional[Any] = None,
+        prediction_result: Optional[PredictionResult] = None
+    ) -> None:
+        """Always returns None without executing LLM prompt generation or API calls."""
+        return None

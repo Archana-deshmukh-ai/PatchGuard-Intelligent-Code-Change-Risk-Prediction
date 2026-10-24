@@ -4,9 +4,10 @@ Combines per-commit Phase 5 ML defect predictions with cumulative BASE->HEAD Pha
 """
 
 import os
+import time
 import subprocess
 import shutil
-from typing import List, Optional
+from typing import List, Optional, Any
 
 from src.engine import RiskPredictionEngine
 from src.engine.exceptions import (
@@ -14,9 +15,13 @@ from src.engine.exceptions import (
     InvalidGitRepositoryError
 )
 from src.analysis.diff_extractor import GitDiffExtractor
-from src.analysis.analyzer import LLMCodeAnalyzer
+from src.analysis.analyzer import LLMCodeAnalyzer, NullLLMAnalyzer
 from src.analysis.pr_schema import PRAnalysisInput, PRCommitPrediction, PRAnalysisResult
-from src.analysis.exceptions import InvalidPRRefError
+from src.analysis.exceptions import (
+    InvalidPRRefError,
+    PRWorkloadLimitExceededError,
+    PRAnalysisTimeoutError
+)
 
 
 def _find_git_executable() -> str:
@@ -44,12 +49,22 @@ class PRAnalyzer:
     def __init__(
         self,
         predictor: Optional[RiskPredictionEngine] = None,
-        llm_analyzer: Optional[LLMCodeAnalyzer] = None
+        llm_analyzer: Optional[Any] = None,
+        max_commits: Optional[int] = None,
+        timeout: Optional[float] = 30.0
     ):
         self.predictor = predictor if predictor is not None else RiskPredictionEngine()
         self.llm_analyzer = llm_analyzer if llm_analyzer is not None else LLMCodeAnalyzer()
+        self.max_commits = max_commits
+        self.timeout = timeout
 
-    def _run_git(self, repo_path: str, args: List[str]) -> subprocess.CompletedProcess:
+    def _run_git(
+        self,
+        repo_path: str,
+        args: List[str],
+        timeout: Optional[float] = None
+    ) -> subprocess.CompletedProcess:
+        effective_timeout = timeout if timeout is not None else self.timeout
         git_executable = _find_git_executable()
         repo_clean = os.path.abspath(repo_path).replace('\\', '/')
         repo_real = os.path.realpath(repo_path).replace('\\', '/')
@@ -57,15 +72,22 @@ class PRAnalyzer:
         if repo_real != repo_clean:
             safe_args += ["-c", f"safe.directory={repo_real}"]
         cmd = [git_executable] + safe_args + args
-        return subprocess.run(
-            cmd,
-            cwd=repo_path,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            encoding='utf-8',
-            errors='replace'
-        )
+        try:
+            return subprocess.run(
+                cmd,
+                cwd=repo_path,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                encoding='utf-8',
+                errors='replace',
+                timeout=effective_timeout
+            )
+        except subprocess.TimeoutExpired as exc:
+            safe_cmd_summary = "git " + " ".join(args)
+            raise PRAnalysisTimeoutError(
+                f"Git command timed out after {effective_timeout}s: {safe_cmd_summary}"
+            ) from exc
 
     def analyze(
         self,
@@ -87,11 +109,20 @@ class PRAnalyzer:
         repo_path: str,
         base_ref: str,
         head_ref: str,
-        threshold: Optional[float] = None
+        threshold: Optional[float] = None,
+        deadline: Optional[float] = None
     ) -> PRAnalysisResult:
         """
         Executes PR analysis for specified base and head references in a repository.
         """
+        def _check_deadline():
+            if deadline is not None and time.perf_counter() >= deadline:
+                raise PRAnalysisTimeoutError(
+                    "Pull Request evaluation exceeded the maximum execution time budget."
+                )
+
+        _check_deadline()
+
         repo_abs = os.path.abspath(repo_path)
         if not os.path.exists(repo_abs):
             raise RepositoryNotFoundError(f"Repository directory does not exist: {repo_abs}")
@@ -100,16 +131,32 @@ class PRAnalyzer:
         if rev_check.returncode != 0:
             raise InvalidGitRepositoryError(f"Directory is not a valid Git repository: {repo_abs}")
 
+        # Guard against option injection in Git reference names
+        if base_ref.startswith("-"):
+            raise InvalidPRRefError(f"Invalid base reference: '{base_ref}' cannot begin with a hyphen.")
+        if head_ref.startswith("-"):
+            raise InvalidPRRefError(f"Invalid head reference: '{head_ref}' cannot begin with a hyphen.")
+
+        _check_deadline()
+
         # 1. Resolve base and head references to full 40-character SHAs
         res_base = self._run_git(repo_abs, ["rev-parse", "--verify", f"{base_ref}^{{commit}}"])
         if res_base.returncode != 0:
             raise InvalidPRRefError(f"Invalid base reference: '{base_ref}'")
+        if "ambiguous" in res_base.stderr.lower():
+            raise InvalidPRRefError(f"Ambiguous base reference: '{base_ref}' matches multiple Git objects.")
         resolved_base_sha = res_base.stdout.strip()
+
+        _check_deadline()
 
         res_head = self._run_git(repo_abs, ["rev-parse", "--verify", f"{head_ref}^{{commit}}"])
         if res_head.returncode != 0:
             raise InvalidPRRefError(f"Invalid head reference: '{head_ref}'")
+        if "ambiguous" in res_head.stderr.lower():
+            raise InvalidPRRefError(f"Ambiguous head reference: '{head_ref}' matches multiple Git objects.")
         resolved_head_sha = res_head.stdout.strip()
+
+        _check_deadline()
 
         # 2. Compute merge base
         mb_res = self._run_git(repo_abs, ["merge-base", resolved_base_sha, resolved_head_sha])
@@ -132,13 +179,22 @@ class PRAnalyzer:
                 cumulative_analysis=None
             )
 
+        _check_deadline()
+
         # 4. Enumerate commits introduced by the PR (merge_base..head)
         rev_list_res = self._run_git(repo_abs, ["rev-list", "--reverse", f"{resolved_merge_base_sha}..{resolved_head_sha}"])
         commit_shas = [s.strip() for s in rev_list_res.stdout.splitlines() if s.strip()]
 
+        if self.max_commits is not None and len(commit_shas) > self.max_commits:
+            raise PRWorkloadLimitExceededError(
+                f"PR introduces {len(commit_shas)} commits, which exceeds the maximum allowable limit of {self.max_commits} commits."
+            )
+
         commit_records: List[PRCommitPrediction] = []
 
         for commit_sha in commit_shas:
+            _check_deadline()
+
             # Get commit log info
             log_res = self._run_git(repo_abs, ["log", "-1", "--format=%H|%an|%aI|%P%n%B", commit_sha])
             lines = log_res.stdout.splitlines() if log_res.returncode == 0 and log_res.stdout else []
@@ -194,16 +250,24 @@ class PRAnalyzer:
             commit_records.append(record)
 
         # 5. Extract cumulative diff (BASE -> HEAD via merge-base) and run LLM analysis
-        diff_extractor = GitDiffExtractor(repo_abs)
-        cumulative_diff = diff_extractor.extract_cumulative_diff(base_ref, head_ref)
-
-        if cumulative_diff.is_empty_commit:
+        # If llm_analyzer is NullLLMAnalyzer, bypass diff extraction and LLM analysis completely
+        if isinstance(self.llm_analyzer, NullLLMAnalyzer):
             cumulative_analysis = None
+            cumulative_is_empty = False
         else:
-            cumulative_analysis = self.llm_analyzer.analyze_commit(
-                commit_diff=cumulative_diff,
-                prediction_result=None
-            )
+            _check_deadline()
+            diff_extractor = GitDiffExtractor(repo_abs)
+            cumulative_diff = diff_extractor.extract_cumulative_diff(base_ref, head_ref)
+            cumulative_is_empty = cumulative_diff.is_empty_commit if cumulative_diff else False
+
+            if cumulative_is_empty:
+                cumulative_analysis = None
+            else:
+                _check_deadline()
+                cumulative_analysis = self.llm_analyzer.analyze_commit(
+                    commit_diff=cumulative_diff,
+                    prediction_result=None
+                )
 
         return PRAnalysisResult(
             repo_path=repo_abs,
@@ -212,7 +276,7 @@ class PRAnalyzer:
             resolved_base_sha=resolved_base_sha,
             resolved_head_sha=resolved_head_sha,
             resolved_merge_base_sha=resolved_merge_base_sha,
-            is_empty=len(commit_records) == 0 or (cumulative_diff.is_empty_commit if cumulative_diff else False),
+            is_empty=len(commit_records) == 0 or cumulative_is_empty,
             commit_count=len(commit_records),
             commits=commit_records,
             cumulative_analysis=cumulative_analysis
